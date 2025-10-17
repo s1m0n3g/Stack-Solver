@@ -1,39 +1,74 @@
-# Stack Solver
+# Stack Solver Web
 
-Stack Solver is a powerful and intuitive application designed to optimize the process of loading cargo. This app provides an efficient solution for logistics and warehouse management by determining the most effective way to load boxes of various sizes onto pallets.
+Stack Solver Web is a browser-based pallet loading optimizer built with Node.js and vanilla web technologies. It is a port of the original WPF desktop application, enabling you to calculate optimal box layouts directly from any device with a modern browser.
 
 ## Features
 
-- Pallet Optimization: Calculates the optimal arrangement of boxes on a pallet to maximize space utilization and stability.
-- Interactive 3D Visualization: Provides a visual representation of the pallet setup.
-- User-friendly Interface: Intuitive and modern design that makes it easy for users to input data, adjust parameters, and view results.
-- Export and Share: Generate detailed reports and visual guides that can be easily shared with team members.
+- 📦 **Single box type optimisation** – determine the best arrangement for a single box size on a pallet.
+- 📐 **Automatic orientation selection** – evaluates both pallet orientations and picks the configuration that maximises the occupied area.
+- 📊 **Detailed metrics** – displays efficiency, number of boxes per level, total weight, and more.
+- 🖼️ **Interactive layout preview** – renders a scaled top-down view of the pallet showing both box orientations.
+- 🌐 **Browser access** – run the solver locally as a Node.js web server without requiring Windows or WPF.
 
-## Screenshots
+## Getting started
 
-![App Screenshot](img/screenshot1.png)
-![App Screenshot](img/screenshot2.png)
+1. Install dependencies:
 
-## Installation 
+   ```bash
+   npm install
+   ```
 
-Install the app by running ```setup.exe``` contained in the zip archive in the releases page.
+2. Start the development server:
 
-If you want to contribute to this project, just clone this repository or download the source code.
+   ```bash
+   npm run dev
+   ```
 
-## Documentation
+   The application becomes available at [http://localhost:3000](http://localhost:3000).
 
-Coming soon™
+3. For production use you can run the lightweight server directly:
 
-## Roadmap
+   ```bash
+   npm start
+   ```
 
-- Truck loading optimization
-- Multiple box types on same pallet
+## Project structure
 
-## Authors
+```
+.
+├── public/           # Static assets served by Express (HTML, CSS, JS)
+├── src/
+│   └── solver.js     # Core optimisation logic translated from the WPF app
+├── server.js         # Express server exposing the web UI and API endpoint
+├── package.json      # Project metadata and scripts
+└── README.md
+```
 
-- [@VladM7](https://github.com/VladM7)
+## API
 
-## Acknowledgements
+A REST endpoint is available at `POST /api/solve` for programmatic access. Example payload:
 
-This project would not have been possible without the following frameworks and libraries:
-- [WPF UI](https://github.com/lepoco/wpfui)
+```json
+{
+  "pallet": {
+    "length": 120,
+    "width": 100,
+    "height": 15,
+    "maxHeight": 180,
+    "weight": 25,
+    "maxWeight": 1000
+  },
+  "box": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "weight": 10
+  }
+}
+```
+
+The response contains pallet metrics, arrangement details, and a ready-to-render layout array for custom visualisations.
+
+## License
+
+Distributed under the MIT License. See `LICENSE` for more information.
