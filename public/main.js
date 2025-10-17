@@ -892,7 +892,7 @@ function normaliseNumericCell(value) {
 
 function renderError(message) {
   currentSolutionSet = null;
-  selectedSolutionIndex = 0;
+  selectedSolutionIndices = new Set();
   resultsPanel.hidden = false;
   layoutPanel.hidden = true;
   summary.innerHTML = `<span class="error">${message}</span>`;
