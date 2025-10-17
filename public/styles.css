@@ -215,6 +215,23 @@ button[type='submit']:hover {
   font-size: 1.1rem;
 }
 
+.metric--with-swatch dd {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.metric__swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+
+.metric__value-text {
+  flex: 1 1 auto;
+}
+
 .result-tabs {
   display: flex;
   flex-wrap: wrap;

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm';
-import { solveStacking } from '../shared/solver.js';
+import { solveStacking, combineSolutions } from '../shared/solver.js';
 
 const form = document.getElementById('stack-form');
 const resultsPanel = document.getElementById('results-panel');
@@ -27,7 +27,7 @@ const colors = {
 
 let threeState = null;
 let currentSolutionSet = null;
-let selectedSolutionIndex = 0;
+let selectedSolutionIndices = new Set();
 
 initialiseBoxes();
 setViewerPlaceholder('The interactive 3D preview will appear once a valid layout is generated.');
@@ -329,7 +329,7 @@ function renderError(message) {
 function renderResult(rawResult) {
   const solution = normaliseSolution(rawResult);
   currentSolutionSet = solution;
-  selectedSolutionIndex = 0;
+  selectedSolutionIndices = new Set([0]);
 
   resultsPanel.hidden = false;
   summary.innerHTML = buildSummaryText(solution);
@@ -416,7 +416,7 @@ function buildSummaryText(solution) {
     parts.push(`${formatNumber(unplacedBoxes)} box${unplacedBoxes === 1 ? '' : 'es'} could not be placed due to constraints.`);
   }
 
-  parts.push('Select a box type below to inspect its layout.');
+  parts.push('Select one or more box types below to inspect or combine their layouts.');
   return parts.join(' ');
 }
 
@@ -434,20 +434,39 @@ function renderTabs(solution) {
     button.type = 'button';
     button.textContent = entry.meta?.displayName || `Box ${index + 1}`;
     button.dataset.index = String(index);
-    button.setAttribute('aria-pressed', index === selectedSolutionIndex ? 'true' : 'false');
-    button.addEventListener('click', () => {
-      selectSolution(index);
+    button.setAttribute('aria-pressed', selectedSolutionIndices.has(index) ? 'true' : 'false');
+    button.addEventListener('click', (event) => {
+      toggleSolutionSelection(index, event);
     });
     solutionTabs.appendChild(button);
   });
 }
 
-function selectSolution(index) {
+function toggleSolutionSelection(index, event) {
   if (!currentSolutionSet) {
     return;
   }
 
-  selectedSolutionIndex = index;
+  const next = new Set(selectedSolutionIndices);
+  const exclusive = event?.altKey || (event?.detail ?? 1) > 1;
+
+  if (exclusive) {
+    next.clear();
+    next.add(index);
+  } else if (next.has(index)) {
+    if (next.size === 1) {
+      return;
+    }
+    next.delete(index);
+  } else {
+    next.add(index);
+  }
+
+  if (!next.size) {
+    next.add(index);
+  }
+
+  selectedSolutionIndices = next;
   updateTabSelection();
   renderSelectedSolution();
 }
@@ -455,7 +474,9 @@ function selectSolution(index) {
 function updateTabSelection() {
   const buttons = solutionTabs.querySelectorAll('button');
   buttons.forEach((button, index) => {
-    button.setAttribute('aria-pressed', index === selectedSolutionIndex ? 'true' : 'false');
+    const pressed = selectedSolutionIndices.has(index);
+    button.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+    button.classList.toggle('is-selected', pressed);
   });
 }
 
@@ -465,48 +486,152 @@ function renderSelectedSolution() {
     return;
   }
 
-  const entry = currentSolutionSet.results[selectedSolutionIndex] || currentSolutionSet.results[0];
+  if (!selectedSolutionIndices.size) {
+    selectedSolutionIndices.add(0);
+  }
+
+  const orderedIndices = Array.from(selectedSolutionIndices).sort((a, b) => a - b);
+  const selectedEntries = orderedIndices
+    .map((index) => currentSolutionSet.results[index])
+    .filter(Boolean);
+
+  if (!selectedEntries.length) {
+    selectedEntries.push(currentSolutionSet.results[0]);
+    selectedSolutionIndices = new Set([0]);
+  }
+
+  let entry;
+  try {
+    entry = selectedEntries.length === 1
+      ? selectedEntries[0]
+      : combineSolutions(selectedEntries, currentSolutionSet.pallet);
+  } catch (error) {
+    metricsContainer.innerHTML = `<p class="error">${error.message}</p>`;
+    layoutPanel.hidden = true;
+    legend.innerHTML = '';
+    setViewerPlaceholder('Unable to display the combined layout for the current selection.');
+    return;
+  }
+
   updateTabSelection();
   renderMetrics(entry);
   renderVisuals(entry);
 }
 
 function renderMetrics(entry) {
-  const metrics = entry.metrics;
+  const metrics = entry.metrics || {};
   const rows = [];
 
-  if (entry.meta?.displayName) {
-    rows.push(['Box type', entry.meta.displayName]);
-  }
+  if (entry.meta?.combined) {
+    rows.push({ label: 'Combined selection', value: `${formatNumber(metrics.layoutCount ?? 0)} box type${(metrics.layoutCount ?? 0) === 1 ? '' : 's'}` });
+    if (entry.meta?.displayName) {
+      rows.push({ label: 'Label', value: entry.meta.displayName });
+    }
+    if (typeof metrics.quantityRequested === 'number' && metrics.quantityRequested > 0) {
+      rows.push({ label: 'Total quantity requested', value: formatNumber(metrics.quantityRequested) });
+    }
+    if (metrics.quantityShortfall > 0) {
+      rows.push({ label: 'Total unplaced quantity', value: formatNumber(metrics.quantityShortfall) });
+    }
+    rows.push({ label: 'Orientation', value: `${orientationDescription(entry)} (base layout)` });
+    rows.push({ label: 'Total boxes placed', value: formatNumber(metrics.totalBoxes) });
+    rows.push({ label: 'Total stack height', value: `${formatNumber(metrics.totalHeight)} cm` });
+    rows.push({ label: 'Combined load weight', value: `${formatNumber(metrics.loadWeight)} kg` });
+    rows.push({ label: 'Combined weight incl. pallet', value: `${formatNumber(metrics.totalWeight)} kg` });
+    rows.push({ label: 'Max cargo footprint', value: `${formatNumber(metrics.cargoLength)} × ${formatNumber(metrics.cargoWidth)} cm` });
+    if (typeof metrics.offsetX === 'number' && typeof metrics.offsetY === 'number') {
+      rows.push({ label: 'Bottom layout offsets (x, y)', value: `${formatNumber(metrics.offsetX)} cm, ${formatNumber(metrics.offsetY)} cm` });
+    }
+    rows.push({ label: 'Best level efficiency', value: `${metrics.efficiency.toFixed(2)} %` });
+    if (metrics.unusedArea > 0) {
+      rows.push({ label: 'Unused area on best level', value: `${formatNumber(metrics.unusedArea)} cm²` });
+    }
+    rows.push({
+      label: 'Stack strategy',
+      value: 'Sorted by box weight so heavier segments are placed closer to the pallet base.',
+    });
 
-  if (typeof metrics.quantityRequested === 'number') {
-    rows.push(['Quantity requested', formatNumber(metrics.quantityRequested)]);
-  }
+    if (Array.isArray(metrics.segments)) {
+      metrics.segments.forEach((segment, index) => {
+        const parts = [
+          `${formatNumber(segment.totalBoxes)} boxes`,
+          `load ${formatNumber(segment.loadWeight)} kg`,
+          `height ${formatNumber(segment.startHeight)}–${formatNumber(segment.endHeight)} cm`,
+        ];
 
-  if (metrics.quantityShortfall > 0) {
-    rows.push(['Unplaced quantity', formatNumber(metrics.quantityShortfall)]);
-  }
+        if (typeof segment.quantityRequested === 'number' && segment.quantityRequested > 0) {
+          const shortfall = segment.quantityShortfall || 0;
+          const fulfilled = segment.totalBoxes;
+          const requested = segment.quantityRequested;
+          let fulfilment = `${formatNumber(fulfilled)} of ${formatNumber(requested)} fulfilled`;
+          if (shortfall > 0) {
+            fulfilment += ` (${formatNumber(shortfall)} unplaced)`;
+          }
+          parts.push(fulfilment);
+        }
 
-  rows.push(['Orientation', orientationDescription(entry)]);
-  rows.push(['Boxes per full level', metrics.boxesPerLevel]);
-  rows.push(['Full levels', metrics.fullLevels]);
-  rows.push(['Levels used', metrics.levels]);
-  rows.push(['Boxes on final level', metrics.lastLevelBoxes]);
-  rows.push(['Total boxes placed', metrics.totalBoxes]);
-  rows.push(['Cargo footprint', `${formatNumber(metrics.cargoLength)} × ${formatNumber(metrics.cargoWidth)} cm`]);
-  rows.push(['Offsets (x, y)', `${formatNumber(metrics.offsetX)} cm, ${formatNumber(metrics.offsetY)} cm`]);
-  rows.push(['Total height', `${formatNumber(metrics.totalHeight)} cm`]);
-  rows.push(['Occupied area', `${formatNumber(metrics.areaOccupied)} cm²`]);
-  rows.push(['Unused area', `${formatNumber(metrics.unusedArea)} cm²`]);
-  rows.push(['Efficiency', `${metrics.efficiency.toFixed(2)} %`]);
-  rows.push(['Load weight', `${formatNumber(metrics.loadWeight)} kg`]);
-  rows.push(['Combined weight', `${formatNumber(metrics.totalWeight)} kg`]);
+        rows.push({
+          label: segment.label || `Segment ${index + 1}`,
+          value: parts.join(' • '),
+          swatchColor: entry.meta?.segmentColors?.[index] || segment.color,
+        });
+      });
+    }
+  } else {
+    if (entry.meta?.displayName) {
+      rows.push({ label: 'Box type', value: entry.meta.displayName });
+    }
+
+    if (typeof metrics.quantityRequested === 'number') {
+      rows.push({ label: 'Quantity requested', value: formatNumber(metrics.quantityRequested) });
+    }
+
+    if (metrics.quantityShortfall > 0) {
+      rows.push({ label: 'Unplaced quantity', value: formatNumber(metrics.quantityShortfall) });
+    }
+
+    rows.push({ label: 'Orientation', value: orientationDescription(entry) });
+    rows.push({ label: 'Boxes per full level', value: formatNumber(metrics.boxesPerLevel) });
+    rows.push({ label: 'Full levels', value: formatNumber(metrics.fullLevels) });
+    rows.push({ label: 'Levels used', value: formatNumber(metrics.levels) });
+    rows.push({ label: 'Boxes on final level', value: formatNumber(metrics.lastLevelBoxes) });
+    rows.push({ label: 'Total boxes placed', value: formatNumber(metrics.totalBoxes) });
+    rows.push({ label: 'Cargo footprint', value: `${formatNumber(metrics.cargoLength)} × ${formatNumber(metrics.cargoWidth)} cm` });
+    rows.push({ label: 'Offsets (x, y)', value: `${formatNumber(metrics.offsetX)} cm, ${formatNumber(metrics.offsetY)} cm` });
+    rows.push({ label: 'Total height', value: `${formatNumber(metrics.totalHeight)} cm` });
+    rows.push({ label: 'Occupied area', value: `${formatNumber(metrics.areaOccupied)} cm²` });
+    rows.push({ label: 'Unused area', value: `${formatNumber(metrics.unusedArea)} cm²` });
+    rows.push({ label: 'Efficiency', value: `${metrics.efficiency.toFixed(2)} %` });
+    rows.push({ label: 'Load weight', value: `${formatNumber(metrics.loadWeight)} kg` });
+    rows.push({ label: 'Combined weight', value: `${formatNumber(metrics.totalWeight)} kg` });
+  }
 
   metricsContainer.innerHTML = '';
-  rows.forEach(([label, value]) => {
+  rows.forEach((row) => {
+    if (!row || typeof row.label !== 'string') {
+      return;
+    }
     const fragment = metricTemplate.content.cloneNode(true);
-    fragment.querySelector('dt').textContent = label;
-    fragment.querySelector('dd').textContent = value;
+    const metricElement = fragment.querySelector('.metric');
+    const dt = fragment.querySelector('dt');
+    const dd = fragment.querySelector('dd');
+    dt.textContent = row.label;
+
+    if (row.swatchColor) {
+      metricElement.classList.add('metric--with-swatch');
+      dd.innerHTML = '';
+      const swatch = document.createElement('span');
+      swatch.className = 'metric__swatch';
+      swatch.style.backgroundColor = row.swatchColor;
+      dd.appendChild(swatch);
+      const text = document.createElement('span');
+      text.className = 'metric__value-text';
+      text.textContent = row.value ?? '';
+      dd.appendChild(text);
+    } else {
+      dd.textContent = row.value ?? '';
+    }
+
     metricsContainer.appendChild(fragment);
   });
 }
@@ -518,7 +643,7 @@ function orientationDescription(entry) {
 }
 
 function renderVisuals(entry) {
-  const { layout, arrangement, pallet, metrics, layout3d } = entry;
+  const { layout, pallet, metrics, layout3d } = entry;
 
   if (!layout || layout.length === 0) {
     layoutPanel.hidden = true;
@@ -529,19 +654,40 @@ function renderVisuals(entry) {
 
   layoutPanel.hidden = false;
   drawLayout(canvas, layout, pallet, metrics);
-  updateLegend(arrangement);
-  render3D(layout3d, pallet, metrics);
+  updateLegend(entry);
+  render3D(layout3d, pallet, metrics, entry.meta);
 }
 
 function formatNumber(value) {
-  return Number(value).toLocaleString(undefined, {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return '0';
+  }
+  return number.toLocaleString(undefined, {
     maximumFractionDigits: 2,
   });
 }
 
-function updateLegend(arrangement) {
+function updateLegend(entry) {
   legend.innerHTML = '';
 
+  if (!entry) {
+    return;
+  }
+
+  if (entry.meta?.combined && Array.isArray(entry.metrics?.segments)) {
+    entry.metrics.segments.forEach((segment, index) => {
+      const span = document.createElement('span');
+      const color = entry.meta?.segmentColors?.[index] || segment.color || colors.lengthwise;
+      const labelText = segment.label || `Segment ${index + 1}`;
+      span.textContent = `${labelText} (${formatNumber(segment.totalBoxes)} boxes)`;
+      span.style.color = color;
+      legend.appendChild(span);
+    });
+    return;
+  }
+
+  const arrangement = entry.arrangement;
   if (!arrangement) {
     return;
   }
@@ -725,7 +871,7 @@ function disposeThreeGroup(group) {
   });
 }
 
-function render3D(layout3d, pallet, metrics) {
+function render3D(layout3d, pallet, metrics, meta = {}) {
   if (!layout3d || layout3d.length === 0) {
     setViewerPlaceholder('3D preview unavailable until a valid layout is generated.');
     return;
@@ -778,9 +924,23 @@ function render3D(layout3d, pallet, metrics) {
     }),
   };
 
+  const segmentMaterials = Array.isArray(meta?.segmentColors) && meta.segmentColors.length
+    ? meta.segmentColors.map((hex) => new THREE.MeshStandardMaterial({
+      color: new THREE.Color(hex),
+      transparent: true,
+      opacity: 0.92,
+    }))
+    : null;
+
   for (const placement of layout3d) {
     const geometry = new THREE.BoxGeometry(placement.length, placement.height, placement.width);
-    const material = orientationMaterials[placement.orientation] || orientationMaterials.lengthwise;
+    let material = orientationMaterials[placement.orientation] || orientationMaterials.lengthwise;
+    if (meta?.combined && segmentMaterials && typeof placement.segmentIndex === 'number') {
+      const customMaterial = segmentMaterials[placement.segmentIndex % segmentMaterials.length];
+      if (customMaterial) {
+        material = customMaterial;
+      }
+    }
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
