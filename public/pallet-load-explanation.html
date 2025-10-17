@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spiegazione del carico - Stack Solver Web</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <div class="header-content">
+        <div class="header-identity">
+          <h1>Stack Solver Web</h1>
+          <p class="tagline">Comprendi come calcoliamo il carico del tuo bancale.</p>
+        </div>
+        <nav class="header-nav" aria-label="Sezioni del sito">
+          <a href="/" class="header-link">Calcolatore</a>
+          <a href="/pallet-load-explanation.html" class="header-link header-link--active">Spiegazione del carico</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="doc-main">
+      <a class="back-link" href="/">Torna al calcolatore</a>
+
+      <section class="doc-section">
+        <h2>Come funziona il calcolo automatico</h2>
+        <p class="doc-lead">
+          Stack Solver analizza i dati del bancale e delle tue scatole per trovare la disposizione più efficiente
+          possibile. L'algoritmo replica le regole del software desktop originale: controlla che le misure siano
+          valide, ottimizza l'orientamento sul piano, determina quante file sovrapporre e restituisce un riepilogo
+          completo dei pesi e degli ingombri.
+        </p>
+        <ul class="doc-list">
+          <li>Validiamo e normalizziamo tutte le dimensioni e i pesi inseriti.</li>
+          <li>Simuliamo l'orientamento delle scatole sia lungo che largo per sfruttare al massimo la superficie.</li>
+          <li>Calcoliamo quante file possono essere impilate rispettando vincoli di altezza, peso e quantità.</li>
+          <li>Costruiamo automaticamente la vista 2D e il modello 3D del bancale completo.</li>
+        </ul>
+      </section>
+
+      <section class="doc-section">
+        <h2>1. Validazione e normalizzazione dei dati</h2>
+        <p>
+          Quando invii una richiesta, il server controlla che ogni campo indispensabile sia presente. I dati del
+          bancale devono includere <strong>lunghezza, larghezza, altezza, altezza massima, peso e portata massima</strong>;
+          ogni tipologia di scatola deve avere almeno lunghezza, larghezza, altezza e peso. Valori negativi o non
+          numerici vengono rifiutati, così come una scatola che superi la superficie o l'altezza utile del bancale.
+        </p>
+        <p class="doc-note">
+          La funzione di normalizzazione converte tutti i valori in numeri, arrotonda le quantità verso il basso e
+          impedisce caricamenti che sforerebbero l'altezza consentita. In questo modo i calcoli successivi partono da
+          un insieme di dati coerente.
+        </p>
+      </section>
+
+      <section class="doc-section">
+        <h2>2. Ricerca dell'orientamento migliore sul piano</h2>
+        <p>
+          Per ogni tipologia di scatola vengono analizzati due scenari: bancale orientato in modo "lungo" e in modo
+          "largo". In ciascuno, la funzione <code>calculateOrientation</code> valuta quante scatole è possibile allineare
+          mantenendo alcune colonne nella stessa direzione della lunghezza e altre ruotate di 90°. Il risultato migliore
+          è quello che occupa più superficie senza superare i bordi del bancale.
+        </p>
+        <p>
+          Da questa fase otteniamo il numero di scatole posizionabili su un singolo livello. Se nessuna configurazione
+          trova spazio sufficiente, l'applicazione segnala immediatamente che le dimensioni inserite non sono compatibili
+          con il bancale.
+        </p>
+      </section>
+
+      <section class="doc-section">
+        <h2>3. Calcolo dei livelli sovrapposti</h2>
+        <p>
+          Conosciuto il numero di scatole per livello, la funzione <code>calculateLevels</code> determina quante
+          sovrapposizioni sono possibili. Il limite principale è l'altezza: sottraiamo lo spessore del bancale dall'altezza
+          massima disponibile e verifichiamo quante volte l'altezza della scatola ci sta senza superarla. Se il bancale ha
+          anche un limite di peso, consideriamo la portata residua e calcoliamo quante scatole aggiuntive permettono di
+          rispettarlo.
+        </p>
+        <p>
+          Nel caso in cui tu imposti una quantità massima desiderata, l'algoritmo adatta il numero di livelli in modo da
+          non superare il totale richiesto, segnalando l'eventuale differenza se il bancale non può contenere tutte le
+          scatole indicate.
+        </p>
+      </section>
+
+      <section class="doc-section">
+        <h2>4. Costruzione del layout e delle anteprime</h2>
+        <p>
+          Una volta determinati livelli e quantità, il motore genera il layout bidimensionale con <code>buildLayout</code>
+          e lo replica in verticale tramite <code>buildStack</code>. Queste informazioni alimentano sia la tabella dei
+          risultati sia la vista 3D interattiva, dove ogni scatola mantiene l'orientamento scelto e l'altezza corretta.
+        </p>
+        <p class="doc-note">
+          Ogni segmento del carico conserva l'origine dei dati (etichetta, colore, indice) così puoi confrontare a colpo
+          d'occhio le diverse tipologie di prodotto quando combini più soluzioni.
+        </p>
+      </section>
+
+      <section class="doc-section">
+        <h2>5. Metriche restituite</h2>
+        <p>
+          Il riepilogo finale presenta tutti gli indicatori utili per verificare il carico del bancale. Alcuni dei più
+          importanti sono raccolti qui di seguito.
+        </p>
+        <div class="doc-kpi-grid">
+          <div class="doc-kpi">
+            <h3>Pezzi caricati</h3>
+            <p>Somma di tutte le scatole posizionate, tenendo conto di eventuali quantità richieste e di carenze.</p>
+          </div>
+          <div class="doc-kpi">
+            <h3>Altezza e peso</h3>
+            <p>Calcoliamo l'altezza finale del carico e il peso complessivo (bancale incluso) per verificare i limiti.</p>
+          </div>
+          <div class="doc-kpi">
+            <h3>Efficienza del piano</h3>
+            <p>Misuriamo quanta superficie del bancale è occupata dalle scatole rispetto all'area disponibile.</p>
+          </div>
+          <div class="doc-kpi">
+            <h3>Supporto e pressione</h3>
+            <p>Per ogni segmento stimiamo area appoggiata e pressione di contatto, utili per valutare la stabilità.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section">
+        <h2>Consigli per ottenere il massimo</h2>
+        <ul class="doc-list">
+          <li>Verifica sempre che le misure siano espresse in centimetri e i pesi in chilogrammi.</li>
+          <li>
+            Se hai più tipologie di scatole, esegui il calcolo individuale e poi usa la funzione di combinazione per
+            confrontare i diversi layout.
+          </li>
+          <li>
+            Quando imposti un limite di quantità, considera che il sistema utilizza il valore intero inferiore per evitare
+            sovraccarichi involontari.
+          </li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      <p>Converted from the original WPF application to a Node.js + web stack.</p>
+    </footer>
+  </body>
+</html>
