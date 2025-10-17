@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stack Solver Web</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Stack Solver Web</h1>
+      <p class="tagline">Optimize pallet loading directly from your browser.</p>
+    </header>
+
+    <main>
+      <section class="panel">
+        <h2>Pallet settings</h2>
+        <form id="stack-form">
+          <div class="grid">
+            <label>Length (cm)
+              <input type="number" step="0.01" name="pallet.length" value="120" required />
+            </label>
+            <label>Width (cm)
+              <input type="number" step="0.01" name="pallet.width" value="100" required />
+            </label>
+            <label>Height (cm)
+              <input type="number" step="0.01" name="pallet.height" value="15" required />
+            </label>
+            <label>Max height (cm)
+              <input type="number" step="0.01" name="pallet.maxHeight" value="180" required />
+            </label>
+            <label>Weight (kg)
+              <input type="number" step="0.01" name="pallet.weight" value="25" required />
+            </label>
+            <label>Max weight (kg)
+              <input type="number" step="0.01" name="pallet.maxWeight" value="1000" />
+            </label>
+          </div>
+
+          <h2>Box settings</h2>
+          <div class="box-controls">
+            <div class="box-controls__group">
+              <button type="button" id="add-box" class="secondary">Add box type</button>
+              <button type="button" id="import-excel" class="secondary">Import from Excel</button>
+            </div>
+            <p class="hint">Add one or more box types manually or populate them from an Excel worksheet.</p>
+            <p id="box-feedback" class="form-feedback" aria-live="polite"></p>
+          </div>
+          <div id="boxes-container" class="box-list" aria-live="polite"></div>
+          <input type="file" id="excel-input" accept=".xlsx,.xls" hidden />
+
+          <button type="submit">Calculate layout</button>
+        </form>
+        <p class="hint">All dimensions use centimetres and weights use kilograms. Quantities are optional; if omitted the solver will fill the pallet to its limits.</p>
+      </section>
+
+      <section class="panel results" id="results-panel" hidden>
+        <h2>Result</h2>
+        <div id="result-summary"></div>
+        <div id="solution-tabs" class="result-tabs" hidden></div>
+        <div id="result-metrics" class="metrics"></div>
+      </section>
+
+      <section class="panel layout" id="layout-panel" hidden>
+        <div class="layout-header">
+          <h2>Top view layout</h2>
+          <div id="layout-legend" class="legend"></div>
+        </div>
+        <canvas id="layout-canvas" width="600" height="400" role="img" aria-label="Pallet layout"></canvas>
+        <div class="layout-header layout-header--secondary">
+          <h2>3D pallet preview</h2>
+        </div>
+        <div
+          id="viewer3d"
+          class="viewer3d"
+          role="img"
+          aria-label="3D pallet preview"
+          data-state="empty"
+          data-placeholder="The interactive 3D preview will appear once a valid layout is generated."
+        ></div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Converted from the original WPF application to a Node.js + web stack.</p>
+    </footer>
+
+    <template id="metric-template">
+      <div class="metric">
+        <dt></dt>
+        <dd></dd>
+      </div>
+    </template>
+
+    <template id="box-row-template">
+      <fieldset class="box-row">
+        <legend class="sr-only">Box type</legend>
+        <div class="grid">
+          <label data-label="Label">Label
+            <input type="text" name="label" placeholder="e.g. 40×30×20" />
+          </label>
+          <label data-label="Length">Length (cm)
+            <input type="number" step="0.01" name="length" required />
+          </label>
+          <label data-label="Width">Width (cm)
+            <input type="number" step="0.01" name="width" required />
+          </label>
+          <label data-label="Height">Height (cm)
+            <input type="number" step="0.01" name="height" required />
+          </label>
+          <label data-label="Weight">Weight (kg)
+            <input type="number" step="0.01" name="weight" required />
+          </label>
+          <label data-label="Quantity">Quantity (optional)
+            <input type="number" step="1" min="0" name="quantity" placeholder="Fill to capacity" />
+          </label>
+        </div>
+        <button type="button" class="remove-box" aria-label="Remove box type">Remove</button>
+      </fieldset>
+    </template>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
