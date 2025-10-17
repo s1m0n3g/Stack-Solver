@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stack Solver Web</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Stack Solver Web</h1>
+      <p class="tagline">Optimize pallet loading directly from your browser.</p>
+    </header>
+
+    <main>
+      <section class="panel">
+        <h2>Pallet settings</h2>
+        <form id="stack-form">
+          <div class="grid">
+            <label>Length (cm)
+              <input type="number" step="0.01" name="pallet.length" value="120" required />
+            </label>
+            <label>Width (cm)
+              <input type="number" step="0.01" name="pallet.width" value="100" required />
+            </label>
+            <label>Height (cm)
+              <input type="number" step="0.01" name="pallet.height" value="15" required />
+            </label>
+            <label>Max height (cm)
+              <input type="number" step="0.01" name="pallet.maxHeight" value="180" required />
+            </label>
+            <label>Weight (kg)
+              <input type="number" step="0.01" name="pallet.weight" value="25" required />
+            </label>
+            <label>Max weight (kg)
+              <input type="number" step="0.01" name="pallet.maxWeight" value="1000" />
+            </label>
+          </div>
+
+          <h2>Box settings</h2>
+          <div class="grid">
+            <label>Length (cm)
+              <input type="number" step="0.01" name="box.length" value="40" required />
+            </label>
+            <label>Width (cm)
+              <input type="number" step="0.01" name="box.width" value="30" required />
+            </label>
+            <label>Height (cm)
+              <input type="number" step="0.01" name="box.height" value="20" required />
+            </label>
+            <label>Weight (kg)
+              <input type="number" step="0.01" name="box.weight" value="10" required />
+            </label>
+          </div>
+
+          <button type="submit">Calculate layout</button>
+        </form>
+        <p class="hint">All dimensions use centimetres and weights use kilograms.</p>
+      </section>
+
+      <section class="panel results" id="results-panel" hidden>
+        <h2>Result</h2>
+        <div id="result-summary"></div>
+        <div id="result-metrics" class="metrics"></div>
+      </section>
+
+      <section class="panel layout" id="layout-panel" hidden>
+        <div class="layout-header">
+          <h2>Top view layout</h2>
+          <div id="layout-legend" class="legend"></div>
+        </div>
+        <canvas id="layout-canvas" width="600" height="400" role="img" aria-label="Pallet layout"></canvas>
+      </section>
+    </main>
+
+    <footer>
+      <p>Converted from the original WPF application to a Node.js + web stack.</p>
+    </footer>
+
+    <template id="metric-template">
+      <div class="metric">
+        <dt></dt>
+        <dd></dd>
+      </div>
+    </template>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
