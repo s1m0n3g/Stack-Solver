@@ -395,6 +395,127 @@ function isPlacementFullySupported(placement, supports, tolerance = 1e-6) {
   return coveredArea + tolerance >= targetArea;
 }
 
+function alignLayoutToSupport(layout, supports) {
+  if (!Array.isArray(layout) || layout.length === 0) {
+    return {
+      translated: [],
+      supported: [],
+      offsetX: 0,
+      offsetY: 0,
+      area: 0,
+    };
+  }
+
+  if (!Array.isArray(supports) || supports.length === 0) {
+    const translated = layout.map((placement) => ({ ...placement }));
+    return {
+      translated,
+      supported: [],
+      offsetX: 0,
+      offsetY: 0,
+      area: 0,
+    };
+  }
+
+  const tolerance = 1e-6;
+  const offsetsX = new Set([0]);
+  const offsetsY = new Set([0]);
+
+  for (const placement of layout) {
+    for (const support of supports) {
+      offsetsX.add(support.x - placement.x);
+      offsetsX.add((support.x + support.length) - (placement.x + placement.length));
+      offsetsY.add(support.y - placement.y);
+      offsetsY.add((support.y + support.width) - (placement.y + placement.width));
+    }
+  }
+
+  let best = {
+    translated: layout.map((placement) => ({ ...placement })),
+    supported: [],
+    offsetX: 0,
+    offsetY: 0,
+    area: 0,
+  };
+
+  const xCandidates = Array.from(offsetsX);
+  const yCandidates = Array.from(offsetsY);
+
+  for (const offsetX of xCandidates) {
+    for (const offsetY of yCandidates) {
+      const translated = layout.map((placement) => ({
+        ...placement,
+        x: placement.x + offsetX,
+        y: placement.y + offsetY,
+      }));
+
+      const supported = [];
+      for (const placement of translated) {
+        if (isPlacementFullySupported(placement, supports, tolerance)) {
+          supported.push({ ...placement });
+        }
+      }
+
+      if (!supported.length) {
+        continue;
+      }
+
+      const supportedArea = supported.reduce(
+        (sum, placement) => sum + placement.length * placement.width,
+        0,
+      );
+
+      const bestCount = best.supported.length;
+      const candidateCount = supported.length;
+      const bestArea = best.area || 0;
+      const candidateArea = supportedArea;
+      const bestShift = Math.abs(best.offsetX) + Math.abs(best.offsetY);
+      const candidateShift = Math.abs(offsetX) + Math.abs(offsetY);
+
+      const isBetter =
+        candidateCount > bestCount
+        || (
+          candidateCount === bestCount
+          && candidateArea > bestArea + tolerance
+        )
+        || (
+          candidateCount === bestCount
+          && Math.abs(candidateArea - bestArea) <= tolerance
+          && candidateShift + tolerance < bestShift
+        );
+
+      if (isBetter) {
+        best = {
+          translated,
+          supported,
+          offsetX,
+          offsetY,
+          area: candidateArea,
+        };
+      }
+    }
+  }
+
+  if (best.supported.length === 0) {
+    const fallbackTranslated = layout.map((placement) => ({ ...placement }));
+    const fallbackSupported = fallbackTranslated.filter((placement) => (
+      isPlacementFullySupported(placement, supports, tolerance)
+    ));
+    return {
+      translated: fallbackTranslated,
+      supported: fallbackSupported.map((placement) => ({ ...placement })),
+      offsetX: 0,
+      offsetY: 0,
+      area: fallbackSupported.reduce(
+        (sum, placement) => sum + placement.length * placement.width,
+        0,
+      ),
+    };
+  }
+
+  return best;
+}
+
 function buildSegmentPlacement(entry, normalisedLayout, baseHeight, levelOffset, segmentIndex, overrides = {}) {
   const layout = overrides.layout ?? normalisedLayout.layout;
   const bounds = normalisedLayout.bounds || measureLayout(layout);
@@ -755,7 +876,7 @@ export function combineSolutions(entries, palletOverride = null) {
       continue;
     }
 
-    const supportedLayout = normalised.layout.filter((placement) => isPlacementFullySupported(placement, currentSupport));
+    const { supported: supportedLayout } = alignLayoutToSupport(normalised.layout, currentSupport);
     if (!supportedLayout.length) {
       const requested = entry.metrics?.quantityRequested ?? null;
       const plannedBoxes = entry.metrics?.totalBoxes || 0;
