@@ -402,6 +402,8 @@ function buildSegmentPlacement(entry, normalisedLayout, baseHeight, levelOffset,
     ? metrics.quantityShortfall
     : 0;
 
+  const support = calculateSupportProfile(entry);
+
   return {
     placements,
     segment: {
@@ -423,9 +425,30 @@ function buildSegmentPlacement(entry, normalisedLayout, baseHeight, levelOffset,
       areaOccupied: normalisedLayout.bounds.area || 0,
       sourceIndex: entry.meta?.sourceIndex ?? segmentIndex,
       orientation: entry.orientation,
+      supportArea: support.area,
+      supportPressure: support.pressure,
+      supportWeight: support.weight,
     },
     endHeight,
   };
+}
+
+function calculateSupportProfile(entry) {
+  const metrics = entry.metrics || {};
+  const box = entry.box || {};
+  const weight = metrics.loadWeight ?? box.weight ?? 0;
+
+  let area = metrics.areaOccupied;
+  if (typeof area !== 'number' || !Number.isFinite(area) || area <= 0) {
+    const length = metrics.cargoLength ?? box.length ?? 0;
+    const width = metrics.cargoWidth ?? box.width ?? 0;
+    area = length > 0 && width > 0 ? length * width : 0;
+  }
+
+  const normalisedArea = area > 0 ? area : 0;
+  const pressure = normalisedArea > 0 ? weight / normalisedArea : Number.POSITIVE_INFINITY;
+
+  return { weight, area: normalisedArea, pressure };
 }
 
 function validateCombinedPallets(entries) {
@@ -601,11 +624,27 @@ export function combineSolutions(entries, palletOverride = null) {
   const sorted = validEntries
     .slice()
     .sort((a, b) => {
-      const weightDiff = (b.box?.weight || 0) - (a.box?.weight || 0);
+      const supportA = calculateSupportProfile(a);
+      const supportB = calculateSupportProfile(b);
+
+      const pressureDiff = supportB.pressure - supportA.pressure;
+      if (Math.abs(pressureDiff) > 1e-6) {
+        return pressureDiff;
+      }
+
+      const weightDiff = supportB.weight - supportA.weight;
       if (Math.abs(weightDiff) > 1e-6) {
         return weightDiff;
       }
-      return (b.metrics?.areaOccupied || 0) - (a.metrics?.areaOccupied || 0);
+
+      const areaDiff = supportB.area - supportA.area;
+      if (Math.abs(areaDiff) > 1e-6) {
+        return areaDiff;
+      }
+
+      const indexA = a.meta?.sourceIndex ?? a.box?.sourceIndex ?? 0;
+      const indexB = b.meta?.sourceIndex ?? b.box?.sourceIndex ?? 0;
+      return indexA - indexB;
     });
 
   const validatedPallet = validateCombinedPallets(sorted);
