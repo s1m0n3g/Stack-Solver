@@ -42,6 +42,7 @@ let selectedSolutionIndices = new Set();
 let topViewVisible = true;
 let threeViewVisible = true;
 let lastVisualEntry = null;
+let baseGroundStats = new Map();
 let currentGroundStats = new Map();
 
 initialiseBoxes();
@@ -727,6 +728,117 @@ function buildGroundStatsFromSolution(solution) {
   return map;
 }
 
+function cloneGroundStats(source) {
+  if (!(source instanceof Map)) {
+    return new Map();
+  }
+
+  const clone = new Map();
+  source.forEach((value, key) => {
+    clone.set(key, value ? { ...value, dimensions: value.dimensions ? { ...value.dimensions } : value.dimensions } : value);
+  });
+  return clone;
+}
+
+function buildGroundStatsForSelection(entry, baseStats) {
+  const base = cloneGroundStats(baseStats);
+  if (!entry) {
+    return base;
+  }
+
+  const applyUpdate = (sourceIndex, data) => {
+    if (typeof sourceIndex !== 'number' || Number.isNaN(sourceIndex)) {
+      return;
+    }
+
+    const existing = base.get(sourceIndex) || {};
+    const existingDimensions = existing.dimensions || {};
+    const mergedDimensions = {
+      length: data.dimensions?.length ?? existingDimensions.length ?? null,
+      width: data.dimensions?.width ?? existingDimensions.width ?? null,
+      height: data.dimensions?.height ?? existingDimensions.height ?? null,
+    };
+
+    const requested = data.hasRequested
+      ? data.requestedTotal
+      : typeof existing.requested === 'number'
+        ? existing.requested
+        : null;
+
+    base.set(sourceIndex, {
+      label: data.label || existing.label || `Box ${sourceIndex + 1}`,
+      requested,
+      placed: data.placed ?? existing.placed ?? 0,
+      unplaced: data.shortfall ?? existing.unplaced ?? 0,
+      dimensions: mergedDimensions,
+    });
+  };
+
+  if (entry.meta?.combined && Array.isArray(entry.metrics?.segments)) {
+    const aggregated = new Map();
+
+    entry.metrics.segments.forEach((segment) => {
+      const sourceIndex = segment?.sourceIndex;
+      if (typeof sourceIndex !== 'number' || Number.isNaN(sourceIndex)) {
+        return;
+      }
+
+      const current = aggregated.get(sourceIndex) || {
+        placed: 0,
+        shortfall: 0,
+        requestedTotal: 0,
+        hasRequested: false,
+        label: null,
+        dimensions: { length: null, width: null, height: null },
+      };
+
+      current.placed += segment.totalBoxes ?? 0;
+      current.shortfall += segment.quantityShortfall ?? 0;
+
+      if (typeof segment.quantityRequested === 'number') {
+        current.requestedTotal += segment.quantityRequested;
+        current.hasRequested = true;
+      }
+
+      if (!current.label && segment.label) {
+        current.label = segment.label;
+      }
+
+      current.dimensions = {
+        length: segment.boxLength ?? current.dimensions.length,
+        width: segment.boxWidth ?? current.dimensions.width,
+        height: segment.boxHeight ?? current.dimensions.height,
+      };
+
+      aggregated.set(sourceIndex, current);
+    });
+
+    aggregated.forEach((data, sourceIndex) => {
+      applyUpdate(sourceIndex, data);
+    });
+
+    return base;
+  }
+
+  const sourceIndex = entry?.meta?.sourceIndex ?? entry?.box?.sourceIndex;
+  if (typeof sourceIndex === 'number' && !Number.isNaN(sourceIndex)) {
+    applyUpdate(sourceIndex, {
+      placed: entry.metrics?.totalBoxes ?? 0,
+      shortfall: entry.metrics?.quantityShortfall ?? 0,
+      requestedTotal: entry.metrics?.quantityRequested ?? 0,
+      hasRequested: typeof entry.metrics?.quantityRequested === 'number',
+      label: entry.meta?.displayName || entry.box?.label || `Box ${sourceIndex + 1}`,
+      dimensions: {
+        length: entry.box?.length ?? null,
+        width: entry.box?.width ?? null,
+        height: entry.box?.height ?? null,
+      },
+    });
+  }
+
+  return base;
+}
+
 function downloadTemplateWorkbook() {
   const bytes = base64ToUint8Array(templateWorkbookBase64);
   const blob = new Blob([bytes], {
@@ -911,6 +1023,7 @@ function renderError(message) {
   setViewerPlaceholder(placeholder);
   viewer3d.hidden = !threeViewVisible;
   updateBoxRowStatuses(currentSolutionSet);
+  baseGroundStats = new Map();
   currentGroundStats = new Map();
   updateGroundDraft();
 }
@@ -920,7 +1033,8 @@ function renderResult(rawResult) {
   currentSolutionSet = solution;
   selectedSolutionIndices = new Set([0]);
 
-  currentGroundStats = buildGroundStatsFromSolution(solution);
+  baseGroundStats = buildGroundStatsFromSolution(solution);
+  currentGroundStats = cloneGroundStats(baseGroundStats);
   updateGroundDraft();
 
   resultsPanel.hidden = false;
@@ -1109,10 +1223,14 @@ function renderSelectedSolution() {
     }
     setViewerPlaceholder('Unable to display the combined layout for the current selection.');
     viewer3d.hidden = !threeViewVisible;
+    currentGroundStats = cloneGroundStats(baseGroundStats);
+    updateGroundDraft();
     return;
   }
 
   updateTabSelection();
+  currentGroundStats = buildGroundStatsForSelection(entry, baseGroundStats);
+  updateGroundDraft();
   renderMetrics(entry);
   renderVisuals(entry);
 }
