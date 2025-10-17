@@ -64,11 +64,29 @@
       <section class="panel layout" id="layout-panel" hidden>
         <div class="layout-header">
           <h2>Top view layout</h2>
-          <div id="layout-legend" class="legend"></div>
+          <div class="layout-header__right">
+            <div id="layout-legend" class="legend"></div>
+            <button type="button" id="toggle-top-view" class="toggle-visual" aria-pressed="false">
+              Hide top view
+            </button>
+          </div>
         </div>
-        <canvas id="layout-canvas" width="600" height="400" role="img" aria-label="Pallet layout"></canvas>
+        <div id="top-view-container" class="top-view-container">
+          <canvas
+            id="layout-canvas"
+            width="600"
+            height="400"
+            role="img"
+            aria-label="Pallet layout"
+          ></canvas>
+        </div>
         <div class="layout-header layout-header--secondary">
           <h2>3D pallet preview</h2>
+          <div class="layout-header__right">
+            <button type="button" id="toggle-3d-view" class="toggle-visual" aria-pressed="false">
+              Hide 3D view
+            </button>
+          </div>
         </div>
         <div
           id="viewer3d"

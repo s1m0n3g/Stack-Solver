@@ -11,6 +11,9 @@ const layoutPanel = document.getElementById('layout-panel');
 const canvas = document.getElementById('layout-canvas');
 const legend = document.getElementById('layout-legend');
 const viewer3d = document.getElementById('viewer3d');
+const topViewContainer = document.getElementById('top-view-container');
+const toggleTopViewButton = document.getElementById('toggle-top-view');
+const toggle3dViewButton = document.getElementById('toggle-3d-view');
 const metricTemplate = document.getElementById('metric-template');
 const solutionTabs = document.getElementById('solution-tabs');
 const boxesContainer = document.getElementById('boxes-container');
@@ -28,9 +31,13 @@ const colors = {
 let threeState = null;
 let currentSolutionSet = null;
 let selectedSolutionIndices = new Set();
+let topViewVisible = true;
+let threeViewVisible = true;
+let lastVisualEntry = null;
 
 initialiseBoxes();
 setViewerPlaceholder('The interactive 3D preview will appear once a valid layout is generated.');
+initialiseViewToggles();
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -117,6 +124,120 @@ function initialiseBoxes() {
   });
   updateRemoveButtons();
   clearBoxFeedback();
+}
+
+function initialiseViewToggles() {
+  if (toggleTopViewButton) {
+    toggleTopViewButton.addEventListener('click', () => {
+      setTopViewVisibility(!topViewVisible);
+    });
+  }
+
+  if (toggle3dViewButton) {
+    toggle3dViewButton.addEventListener('click', () => {
+      setThreeViewVisibility(!threeViewVisible);
+    });
+  }
+
+  setTopViewVisibility(true);
+  setThreeViewVisibility(true);
+}
+
+function setTopViewVisibility(visible) {
+  topViewVisible = visible;
+
+  if (toggleTopViewButton) {
+    toggleTopViewButton.setAttribute('aria-pressed', visible ? 'false' : 'true');
+    toggleTopViewButton.textContent = visible ? 'Hide top view' : 'Show top view';
+  }
+
+  refreshTopView();
+}
+
+function refreshTopView() {
+  if (!topViewContainer || !canvas) {
+    return;
+  }
+
+  const hasLayout = Array.isArray(lastVisualEntry?.layout) && lastVisualEntry.layout.length > 0;
+
+  if (!hasLayout) {
+    if (legend) {
+      legend.hidden = true;
+      legend.innerHTML = '';
+    }
+    topViewContainer.hidden = true;
+    if (toggleTopViewButton) {
+      toggleTopViewButton.disabled = true;
+    }
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    return;
+  }
+
+  if (toggleTopViewButton) {
+    toggleTopViewButton.disabled = false;
+  }
+
+  if (legend) {
+    legend.hidden = !topViewVisible;
+  }
+
+  topViewContainer.hidden = !topViewVisible;
+
+  if (!topViewVisible) {
+    return;
+  }
+
+  drawLayout(canvas, lastVisualEntry.layout, lastVisualEntry.pallet, lastVisualEntry.metrics);
+}
+
+function setThreeViewVisibility(visible) {
+  threeViewVisible = visible;
+
+  if (toggle3dViewButton) {
+    toggle3dViewButton.setAttribute('aria-pressed', visible ? 'false' : 'true');
+    toggle3dViewButton.textContent = visible ? 'Hide 3D view' : 'Show 3D view';
+  }
+
+  if (!visible) {
+    viewer3d.hidden = true;
+    setViewerPlaceholder('3D view hidden. Toggle to show the preview.');
+    return;
+  }
+
+  viewer3d.hidden = false;
+  refresh3D();
+}
+
+function refresh3D() {
+  if (!viewer3d) {
+    return;
+  }
+
+  const hasLayout3d = Array.isArray(lastVisualEntry?.layout3d) && lastVisualEntry.layout3d.length > 0;
+
+  if (toggle3dViewButton) {
+    toggle3dViewButton.disabled = !hasLayout3d;
+  }
+
+  if (!hasLayout3d) {
+    if (threeViewVisible) {
+      viewer3d.hidden = false;
+      setViewerPlaceholder('3D preview unavailable until a valid layout is generated.');
+    }
+    return;
+  }
+
+  if (!threeViewVisible) {
+    viewer3d.hidden = true;
+    return;
+  }
+
+  viewer3d.hidden = false;
+  render3D(lastVisualEntry.layout3d, lastVisualEntry.pallet, lastVisualEntry.metrics, lastVisualEntry.meta);
 }
 
 function addBoxRow(values = {}) {
@@ -323,7 +444,16 @@ function renderError(message) {
   solutionTabs.hidden = true;
   solutionTabs.innerHTML = '';
   legend.innerHTML = '';
-  setViewerPlaceholder('3D preview unavailable until a valid layout is generated.');
+  lastVisualEntry = null;
+  refreshTopView();
+  if (toggle3dViewButton) {
+    toggle3dViewButton.disabled = true;
+  }
+  const placeholder = threeViewVisible
+    ? '3D preview unavailable until a valid layout is generated.'
+    : '3D view hidden. Toggle to show the preview.';
+  setViewerPlaceholder(placeholder);
+  viewer3d.hidden = !threeViewVisible;
 }
 
 function renderResult(rawResult) {
@@ -509,7 +639,13 @@ function renderSelectedSolution() {
     metricsContainer.innerHTML = `<p class="error">${error.message}</p>`;
     layoutPanel.hidden = true;
     legend.innerHTML = '';
+    lastVisualEntry = null;
+    refreshTopView();
+    if (toggle3dViewButton) {
+      toggle3dViewButton.disabled = true;
+    }
     setViewerPlaceholder('Unable to display the combined layout for the current selection.');
+    viewer3d.hidden = !threeViewVisible;
     return;
   }
 
@@ -643,19 +779,21 @@ function orientationDescription(entry) {
 }
 
 function renderVisuals(entry) {
-  const { layout, pallet, metrics, layout3d } = entry;
+  const hasLayout = Array.isArray(entry?.layout) && entry.layout.length > 0;
 
-  if (!layout || layout.length === 0) {
+  if (!hasLayout) {
+    lastVisualEntry = null;
     layoutPanel.hidden = true;
-    legend.innerHTML = '';
-    setViewerPlaceholder('3D preview unavailable until a valid layout is generated.');
+    refreshTopView();
+    refresh3D();
     return;
   }
 
+  lastVisualEntry = entry;
   layoutPanel.hidden = false;
-  drawLayout(canvas, layout, pallet, metrics);
   updateLegend(entry);
-  render3D(layout3d, pallet, metrics, entry.meta);
+  refreshTopView();
+  refresh3D();
 }
 
 function formatNumber(value) {
