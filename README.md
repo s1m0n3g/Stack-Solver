@@ -9,7 +9,7 @@ Stack Solver Web is a browser-based pallet loading optimizer built with Node.js 
 - 📊 **Detailed metrics** – displays efficiency, number of boxes per level, total weight, and more.
 - 🖼️ **Interactive layout preview** – renders a scaled top-down view of the pallet showing both box orientations.
 - 🧱 **3D pallet visualisation** – reproduces the original desktop app's 3D stack preview directly in the browser using WebGL.
-- 🌐 **Browser access** – run the solver locally as a Node.js web server without requiring Windows or WPF.
+- 🌐 **Browser access** – calculate layouts instantly in the browser with no round-trips to the server.
 
 ## Getting started
 
@@ -38,8 +38,8 @@ Stack Solver Web is a browser-based pallet loading optimizer built with Node.js 
 ```
 .
 ├── public/           # Static assets served by Express (HTML, CSS, JS)
-├── src/
-│   └── solver.js     # Core optimisation logic translated from the WPF app
+├── shared/
+│   └── solver.js     # Core optimisation logic shared by the UI and API
 ├── server.js         # Express server exposing the web UI and API endpoint
 ├── package.json      # Project metadata and scripts
 └── README.md
@@ -47,7 +47,7 @@ Stack Solver Web is a browser-based pallet loading optimizer built with Node.js 
 
 ## API
 
-A REST endpoint is available at `POST /api/solve` for programmatic access. Example payload:
+The browser UI reuses the same solver module locally, so results are available even if the API is unreachable. For integrations, a REST endpoint remains available at `POST /api/solve`. Example payload:
 
 ```json
 {

@@ -1,5 +1,6 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+import { solveStacking } from '../shared/solver.js';
 
 const form = document.getElementById('stack-form');
 const resultsPanel = document.getElementById('results-panel');
@@ -19,23 +20,13 @@ const colors = {
 let threeState = null;
 setViewerPlaceholder('The interactive 3D preview will appear once a valid layout is generated.');
 
-form.addEventListener('submit', async (event) => {
+form.addEventListener('submit', (event) => {
   event.preventDefault();
   const payload = buildPayload(new FormData(form));
 
   try {
-    const response = await fetch('/api/solve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const result = await response.json();
-    if (!result.ok) {
-      throw new Error(result.error || 'Unknown error.');
-    }
-
-    renderResult(result.data);
+    const result = solveStacking(payload);
+    renderResult(result);
   } catch (error) {
     renderError(error.message);
   }
