@@ -24,6 +24,12 @@ const importExcelButton = document.getElementById('import-excel');
 const downloadTemplateButton = document.getElementById('download-template');
 const excelInput = document.getElementById('excel-input');
 const boxFeedback = document.getElementById('box-feedback');
+const stagingPanel = document.getElementById('staging-panel');
+const stagingBoxes = document.getElementById('staging-boxes');
+const stagingStatus = document.getElementById('staging-status');
+const unplacedPanel = document.getElementById('unplaced-panel');
+const unplacedShelf = document.getElementById('unplaced-shelf');
+const unplacedTotal = document.getElementById('unplaced-total');
 
 const colors = {
   lengthwise: '#1f6feb',
@@ -36,6 +42,7 @@ let selectedSolutionIndices = new Set();
 let topViewVisible = true;
 let threeViewVisible = true;
 let lastVisualEntry = null;
+let currentGroundStats = new Map();
 
 initialiseBoxes();
 setViewerPlaceholder('The interactive 3D preview will appear once a valid layout is generated.');
@@ -73,8 +80,13 @@ boxesContainer.addEventListener('click', (event) => {
       updateRemoveButtons();
       setBoxFeedback('Box type removed.');
       updateBoxRowStatuses(currentSolutionSet);
+      updateGroundDraft();
     }
   }
+});
+
+boxesContainer.addEventListener('input', () => {
+  updateGroundDraft();
 });
 
 importExcelButton.addEventListener('click', () => {
@@ -124,6 +136,7 @@ excelInput.addEventListener('change', async (event) => {
     updateRemoveButtons();
     setBoxFeedback(`Imported ${entries.length} box type${entries.length === 1 ? '' : 's'} from “${file.name}”.`);
     updateBoxRowStatuses(currentSolutionSet);
+    updateGroundDraft();
   } catch (error) {
     setBoxFeedback(error.message, 'error');
   }
@@ -141,6 +154,7 @@ function initialiseBoxes() {
   updateRemoveButtons();
   clearBoxFeedback();
   updateBoxRowStatuses(currentSolutionSet);
+  updateGroundDraft();
 }
 
 function initialiseViewToggles() {
@@ -278,6 +292,7 @@ function addBoxRow(values = {}) {
   clearRowStatus(fieldset);
   boxesContainer.appendChild(fieldset);
   updateBoxRowStatuses(currentSolutionSet);
+  updateGroundDraft();
 }
 
 function ensureAtLeastOneBox() {
@@ -380,6 +395,336 @@ function updateBoxRowStatuses(solution) {
       clearRowStatus(row);
     }
   });
+}
+
+function updateGroundDraft() {
+  const drafts = collectDraftBoxes();
+  const stats = currentGroundStats instanceof Map ? currentGroundStats : new Map();
+  renderStagingGround(drafts, stats);
+  renderUnplacedShelf(drafts, stats);
+}
+
+function collectDraftBoxes() {
+  if (!boxesContainer) {
+    return [];
+  }
+
+  const rows = Array.from(boxesContainer.querySelectorAll('.box-row'));
+  return rows.map((row, index) => {
+    const readInputValue = (name) => {
+      const input = row.querySelector(`input[name="${name}"]`);
+      return input ? input.value.trim() : '';
+    };
+
+    const parseDimension = (name) => {
+      const raw = readInputValue(name);
+      if (!raw) {
+        return null;
+      }
+      const normalised = raw.replace(',', '.');
+      const number = Number(normalised);
+      if (!Number.isFinite(number) || number <= 0) {
+        return null;
+      }
+      return number;
+    };
+
+    const parseQuantity = () => {
+      const raw = readInputValue('quantity');
+      if (!raw) {
+        return null;
+      }
+      const normalised = raw.replace(',', '.');
+      const number = Number(normalised);
+      if (!Number.isFinite(number) || number < 0) {
+        return null;
+      }
+      return Math.floor(number);
+    };
+
+    const labelValue = readInputValue('label');
+
+    return {
+      index,
+      label: labelValue || `Box ${index + 1}`,
+      length: parseDimension('length'),
+      width: parseDimension('width'),
+      height: parseDimension('height'),
+      quantity: parseQuantity(),
+    };
+  });
+}
+
+function formatDraftDimensions(source) {
+  if (!source) {
+    return '';
+  }
+
+  const dimensions = ['length', 'width', 'height']
+    .map((key) => {
+      const value = Number(source[key]);
+      return Number.isFinite(value) && value > 0 ? formatNumber(value) : null;
+    });
+
+  if (dimensions.every((value) => typeof value === 'string')) {
+    return `${dimensions[0]} × ${dimensions[1]} × ${dimensions[2]} cm`;
+  }
+
+  return '';
+}
+
+function renderStagingGround(drafts, statsMap) {
+  if (!stagingPanel || !stagingBoxes || !stagingStatus) {
+    return;
+  }
+
+  if (!Array.isArray(drafts) || drafts.length === 0) {
+    stagingStatus.textContent = 'Aggiungi almeno una tipologia di scatola per popolare l’area di preparazione.';
+    stagingBoxes.innerHTML = '';
+    return;
+  }
+
+  const map = statsMap instanceof Map ? statsMap : new Map();
+
+  const totalRemaining = drafts.reduce((sum, draft) => {
+    const stats = map.get(draft.index);
+    if (stats) {
+      return sum + Math.max(0, stats.unplaced ?? 0);
+    }
+    if (typeof draft.quantity === 'number') {
+      return sum + Math.max(0, draft.quantity);
+    }
+    return sum;
+  }, 0);
+
+  if (map.size > 0) {
+    stagingStatus.textContent = totalRemaining > 0
+      ? `Ancora a terra: ${formatNumber(totalRemaining)} pezzi in attesa di ottimizzazione.`
+      : 'Tutte le scatole sono state posizionate sul bancale.';
+  } else {
+    stagingStatus.textContent = 'Le scatole inserite vengono tenute a terra finché non lanci il calcolo.';
+  }
+
+  stagingBoxes.innerHTML = '';
+
+  drafts.forEach((draft) => {
+    const stats = map.get(draft.index);
+    const card = document.createElement('div');
+    card.className = 'staging-box';
+
+    const state = (() => {
+      if (stats) {
+        const placed = stats.placed ?? 0;
+        const unplaced = stats.unplaced ?? 0;
+        if (unplaced > 0 && placed > 0) {
+          return 'partial';
+        }
+        if (unplaced <= 0 && placed > 0) {
+          return 'ready';
+        }
+        if (unplaced > 0 && placed <= 0) {
+          return 'waiting';
+        }
+        if (placed > 0) {
+          return 'ready';
+        }
+      }
+      return 'waiting';
+    })();
+
+    card.setAttribute('data-state', state);
+
+    const badge = document.createElement('span');
+    badge.className = 'staging-box__badge';
+    badge.textContent = state === 'ready'
+      ? 'Sul bancale'
+      : state === 'partial'
+        ? 'Parziale'
+        : 'In attesa';
+    card.appendChild(badge);
+
+    const label = document.createElement('span');
+    label.className = 'staging-box__label';
+    label.textContent = stats?.label || draft.label;
+    card.appendChild(label);
+
+    const dimsText = formatDraftDimensions(stats?.dimensions || draft);
+    if (dimsText) {
+      const dims = document.createElement('span');
+      dims.className = 'staging-box__dims';
+      dims.textContent = dimsText;
+      card.appendChild(dims);
+    }
+
+    const info = document.createElement('div');
+    info.className = 'staging-box__info';
+
+    const requested = typeof stats?.requested === 'number'
+      ? stats.requested
+      : typeof draft.quantity === 'number'
+        ? draft.quantity
+        : null;
+
+    if (typeof requested === 'number') {
+      const requestedItem = document.createElement('span');
+      requestedItem.textContent = `Richiesti: ${formatNumber(requested)}`;
+      info.appendChild(requestedItem);
+    } else {
+      const fillItem = document.createElement('span');
+      fillItem.textContent = 'Riempimento fino alla capacità.';
+      info.appendChild(fillItem);
+    }
+
+    if (stats) {
+      const placed = document.createElement('span');
+      placed.textContent = `Sul bancale: ${formatNumber(stats.placed ?? 0)}`;
+      info.appendChild(placed);
+
+      if ((stats.unplaced ?? 0) > 0) {
+        const remaining = document.createElement('span');
+        remaining.textContent = `Ancora a terra: ${formatNumber(stats.unplaced ?? 0)}`;
+        info.appendChild(remaining);
+      } else {
+        const clear = document.createElement('span');
+        clear.textContent = 'Nessuna scatola a terra.';
+        info.appendChild(clear);
+      }
+    } else if (typeof requested === 'number') {
+      const waiting = document.createElement('span');
+      waiting.textContent = `In attesa: ${formatNumber(requested)}`;
+      info.appendChild(waiting);
+    }
+
+    card.appendChild(info);
+
+    const pile = document.createElement('div');
+    pile.className = 'staging-box__pile';
+    const groundCount = stats ? stats.unplaced ?? 0 : (typeof draft.quantity === 'number' ? draft.quantity : 0);
+    const crateCount = Math.min(12, Math.max(0, Math.round(groundCount)));
+    for (let index = 0; index < crateCount; index += 1) {
+      const crate = document.createElement('span');
+      crate.className = 'staging-box__crate';
+      pile.appendChild(crate);
+    }
+    if (groundCount > crateCount) {
+      const more = document.createElement('span');
+      more.className = 'staging-box__more';
+      more.textContent = `+${formatNumber(groundCount - crateCount)}`;
+      pile.appendChild(more);
+    }
+    card.appendChild(pile);
+
+    stagingBoxes.appendChild(card);
+  });
+}
+
+function renderUnplacedShelf(drafts, statsMap) {
+  if (!unplacedPanel || !unplacedShelf || !unplacedTotal) {
+    return;
+  }
+
+  const map = statsMap instanceof Map ? statsMap : new Map();
+
+  const entries = drafts
+    .map((draft) => {
+      const stats = map.get(draft.index);
+      if (!stats || (stats.unplaced ?? 0) <= 0) {
+        return null;
+      }
+
+      return {
+        label: stats.label || draft.label,
+        dimensions: formatDraftDimensions(stats.dimensions || draft),
+        unplaced: stats.unplaced ?? 0,
+      };
+    })
+    .filter((entry) => entry !== null);
+
+  const totalUnplaced = entries.reduce((sum, entry) => sum + entry.unplaced, 0);
+
+  if (totalUnplaced <= 0) {
+    unplacedPanel.hidden = true;
+    unplacedShelf.innerHTML = '';
+    unplacedTotal.textContent = 'Totale: 0 pezzi';
+    return;
+  }
+
+  unplacedPanel.hidden = false;
+  unplacedTotal.textContent = `Totale: ${formatNumber(totalUnplaced)} pezzi`;
+  unplacedShelf.innerHTML = '';
+
+  entries.forEach((entry) => {
+    const item = document.createElement('div');
+    item.className = 'unplaced-box';
+
+    const label = document.createElement('span');
+    label.className = 'unplaced-box__label';
+    label.textContent = entry.label;
+    item.appendChild(label);
+
+    if (entry.dimensions) {
+      const dims = document.createElement('span');
+      dims.className = 'unplaced-box__dims';
+      dims.textContent = entry.dimensions;
+      item.appendChild(dims);
+    }
+
+    const count = document.createElement('span');
+    count.className = 'unplaced-box__count';
+    count.textContent = `${formatNumber(entry.unplaced)} pezzi fuori pallet`;
+    item.appendChild(count);
+
+    const stack = document.createElement('div');
+    stack.className = 'unplaced-box__stack';
+    const crateCount = Math.min(10, Math.max(0, Math.round(entry.unplaced)));
+    for (let index = 0; index < crateCount; index += 1) {
+      const cube = document.createElement('span');
+      cube.className = 'unplaced-box__crate';
+      stack.appendChild(cube);
+    }
+    if (entry.unplaced > crateCount) {
+      const more = document.createElement('span');
+      more.className = 'unplaced-box__more';
+      more.textContent = `+${formatNumber(entry.unplaced - crateCount)}`;
+      stack.appendChild(more);
+    }
+
+    item.appendChild(stack);
+    unplacedShelf.appendChild(item);
+  });
+}
+
+function buildGroundStatsFromSolution(solution) {
+  if (!solution || !Array.isArray(solution.results)) {
+    return new Map();
+  }
+
+  const map = new Map();
+  solution.results.forEach((entry) => {
+    const sourceIndex = entry?.meta?.sourceIndex ?? entry?.box?.sourceIndex;
+    if (typeof sourceIndex !== 'number' || Number.isNaN(sourceIndex)) {
+      return;
+    }
+
+    const metrics = entry.metrics || {};
+    const box = entry.box || {};
+
+    map.set(sourceIndex, {
+      label: entry.meta?.displayName || `Box ${sourceIndex + 1}`,
+      requested: typeof metrics.quantityRequested === 'number' && metrics.quantityRequested >= 0
+        ? metrics.quantityRequested
+        : null,
+      placed: metrics.totalBoxes ?? 0,
+      unplaced: metrics.quantityShortfall ?? 0,
+      dimensions: {
+        length: box.length ?? null,
+        width: box.width ?? null,
+        height: box.height ?? null,
+      },
+    });
+  });
+
+  return map;
 }
 
 function downloadTemplateWorkbook() {
@@ -566,12 +911,17 @@ function renderError(message) {
   setViewerPlaceholder(placeholder);
   viewer3d.hidden = !threeViewVisible;
   updateBoxRowStatuses(currentSolutionSet);
+  currentGroundStats = new Map();
+  updateGroundDraft();
 }
 
 function renderResult(rawResult) {
   const solution = normaliseSolution(rawResult);
   currentSolutionSet = solution;
   selectedSolutionIndices = new Set([0]);
+
+  currentGroundStats = buildGroundStatsFromSolution(solution);
+  updateGroundDraft();
 
   resultsPanel.hidden = false;
   summary.innerHTML = buildSummaryText(solution);

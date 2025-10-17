@@ -65,6 +65,14 @@
         <p class="hint">All dimensions use centimetres and weights use kilograms. Quantities are optional; if omitted the solver will fill the pallet to its limits.</p>
       </section>
 
+      <section class="panel staging" id="staging-panel">
+        <div class="staging__header">
+          <h2>Area di preparazione</h2>
+          <p id="staging-status" class="staging__status">Aggiungi i pacchi: compariranno qui in attesa di essere caricati sul bancale.</p>
+        </div>
+        <div id="staging-boxes" class="staging__boxes" aria-live="polite"></div>
+      </section>
+
       <section class="panel results" id="results-panel" hidden>
         <h2>Result</h2>
         <div id="result-summary"></div>
@@ -82,14 +90,31 @@
             </button>
           </div>
         </div>
-        <div id="top-view-container" class="top-view-container">
-          <canvas
-            id="layout-canvas"
-            width="600"
-            height="400"
-            role="img"
-            aria-label="Pallet layout"
-          ></canvas>
+        <div class="layout-stage">
+          <div class="layout-stage__pallet">
+            <div id="top-view-container" class="top-view-container">
+              <canvas
+                id="layout-canvas"
+                width="600"
+                height="400"
+                role="img"
+                aria-label="Pallet layout"
+              ></canvas>
+            </div>
+          </div>
+          <aside
+            id="unplaced-panel"
+            class="layout-stage__unplaced unplaced-panel"
+            aria-live="polite"
+            hidden
+          >
+            <div class="unplaced-panel__header">
+              <h3>Ripiano scarti</h3>
+              <span id="unplaced-total" class="unplaced-total" aria-live="polite">Totale: 0 pezzi</span>
+            </div>
+            <p class="unplaced-panel__hint">Scatole non ancora posizionate sul bancale (Total unplaced quantity).</p>
+            <div id="unplaced-shelf" class="unplaced-shelf"></div>
+          </aside>
         </div>
         <div class="layout-header layout-header--secondary">
           <h2>3D pallet preview</h2>
