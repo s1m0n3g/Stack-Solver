@@ -1,5 +1,6 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+import XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm';
 import { solveStacking } from '../shared/solver.js';
 
 const form = document.getElementById('stack-form');
@@ -11,6 +12,13 @@ const canvas = document.getElementById('layout-canvas');
 const legend = document.getElementById('layout-legend');
 const viewer3d = document.getElementById('viewer3d');
 const metricTemplate = document.getElementById('metric-template');
+const solutionTabs = document.getElementById('solution-tabs');
+const boxesContainer = document.getElementById('boxes-container');
+const boxTemplate = document.getElementById('box-row-template');
+const addBoxButton = document.getElementById('add-box');
+const importExcelButton = document.getElementById('import-excel');
+const excelInput = document.getElementById('excel-input');
+const boxFeedback = document.getElementById('box-feedback');
 
 const colors = {
   lengthwise: '#1f6feb',
@@ -18,13 +26,18 @@ const colors = {
 };
 
 let threeState = null;
+let currentSolutionSet = null;
+let selectedSolutionIndex = 0;
+
+initialiseBoxes();
 setViewerPlaceholder('The interactive 3D preview will appear once a valid layout is generated.');
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
-  const payload = buildPayload(new FormData(form));
+  clearBoxFeedback();
 
   try {
+    const payload = buildPayload();
     const result = solveStacking(payload);
     renderResult(result);
   } catch (error) {
@@ -32,66 +45,489 @@ form.addEventListener('submit', (event) => {
   }
 });
 
-function buildPayload(formData) {
-  const payload = { pallet: {}, box: {} };
-  for (const [key, value] of formData.entries()) {
-    const [section, field] = key.split('.');
-    payload[section][field] = value;
+addBoxButton.addEventListener('click', () => {
+  addBoxRow();
+  updateRemoveButtons();
+  setBoxFeedback('Added a new box type.');
+});
+
+boxesContainer.addEventListener('click', (event) => {
+  if (!(event.target instanceof HTMLElement)) {
+    return;
   }
+
+  if (event.target.classList.contains('remove-box')) {
+    const row = event.target.closest('.box-row');
+    if (row) {
+      row.remove();
+      ensureAtLeastOneBox();
+      updateRemoveButtons();
+      setBoxFeedback('Box type removed.');
+    }
+  }
+});
+
+importExcelButton.addEventListener('click', () => {
+  excelInput.click();
+});
+
+excelInput.addEventListener('change', async (event) => {
+  const [file] = event.target.files || [];
+  excelInput.value = '';
+
+  if (!file) {
+    return;
+  }
+
+  try {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    const [sheetName] = workbook.SheetNames;
+    if (!sheetName) {
+      throw new Error('The workbook does not contain any worksheets.');
+    }
+
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+    const entries = parseWorksheet(rows);
+
+    if (!entries.length) {
+      throw new Error('No valid box rows were found in the worksheet.');
+    }
+
+    boxesContainer.innerHTML = '';
+    for (const entry of entries) {
+      addBoxRow(entry);
+    }
+    updateRemoveButtons();
+    setBoxFeedback(`Imported ${entries.length} box type${entries.length === 1 ? '' : 's'} from “${file.name}”.`);
+  } catch (error) {
+    setBoxFeedback(error.message, 'error');
+  }
+});
+
+function initialiseBoxes() {
+  boxesContainer.innerHTML = '';
+  addBoxRow({
+    label: 'Box 40×30×20',
+    length: 40,
+    width: 30,
+    height: 20,
+    weight: 10,
+  });
+  updateRemoveButtons();
+  clearBoxFeedback();
+}
+
+function addBoxRow(values = {}) {
+  const fragment = boxTemplate.content.cloneNode(true);
+  const fieldset = fragment.querySelector('.box-row');
+  if (!fieldset) {
+    return;
+  }
+
+  const inputs = fieldset.querySelectorAll('input');
+  inputs.forEach((input) => {
+    const name = input.name;
+    if (Object.prototype.hasOwnProperty.call(values, name) && values[name] !== undefined && values[name] !== null) {
+      const value = values[name];
+      input.value = typeof value === 'number' ? String(value) : String(value);
+    } else if (!input.value) {
+      input.value = '';
+    }
+  });
+
+  boxesContainer.appendChild(fieldset);
+}
+
+function ensureAtLeastOneBox() {
+  if (!boxesContainer.querySelector('.box-row')) {
+    addBoxRow();
+  }
+}
+
+function updateRemoveButtons() {
+  const rows = boxesContainer.querySelectorAll('.box-row');
+  const disable = rows.length <= 1;
+  rows.forEach((row) => {
+    const button = row.querySelector('.remove-box');
+    if (button) {
+      button.disabled = disable;
+      button.setAttribute('aria-disabled', disable ? 'true' : 'false');
+    }
+  });
+}
+
+function clearBoxFeedback() {
+  setBoxFeedback('');
+}
+
+function setBoxFeedback(message, type = 'info') {
+  if (!boxFeedback) {
+    return;
+  }
+
+  boxFeedback.textContent = message;
+  if (type === 'error') {
+    boxFeedback.classList.add('form-feedback--error');
+  } else {
+    boxFeedback.classList.remove('form-feedback--error');
+  }
+}
+
+function buildPayload() {
+  const formData = new FormData(form);
+  const pallet = {};
+
+  for (const [key, value] of formData.entries()) {
+    if (!key.startsWith('pallet.')) {
+      continue;
+    }
+    const [, field] = key.split('.');
+    pallet[field] = value;
+  }
+
+  const boxes = readBoxes();
+  return { pallet, boxes };
+}
+
+function readBoxes() {
+  const rows = Array.from(boxesContainer.querySelectorAll('.box-row'));
+  if (!rows.length) {
+    throw new Error('Add at least one box type before calculating the layout.');
+  }
+
+  const boxes = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    boxes.push(readBoxRow(rows[index], index));
+  }
+  return boxes;
+}
+
+function readBoxRow(row, index) {
+  const inputs = row.querySelectorAll('input');
+  const values = {};
+  inputs.forEach((input) => {
+    values[input.name] = input.value.trim();
+  });
+
+  const label = values.label || '';
+  const descriptor = label || `Box type ${index + 1}`;
+  const requiredFields = [
+    ['length', 'Length'],
+    ['width', 'Width'],
+    ['height', 'Height'],
+    ['weight', 'Weight'],
+  ];
+
+  for (const [field, friendly] of requiredFields) {
+    if (!values[field]) {
+      throw new Error(`${descriptor}: ${friendly} is required.`);
+    }
+  }
+
+  const payload = {
+    label,
+    length: values.length,
+    width: values.width,
+    height: values.height,
+    weight: values.weight,
+  };
+
+  if (values.quantity) {
+    payload.quantity = values.quantity;
+  }
+
   return payload;
 }
 
+function parseWorksheet(rows) {
+  if (!rows || rows.length === 0) {
+    throw new Error('The worksheet is empty.');
+  }
+
+  const header = rows[0].map((cell) => normaliseHeader(cell));
+  const findIndex = (aliases) => header.findIndex((value) => aliases.includes(value));
+
+  const lengthIndex = findIndex(['length', 'len', 'l', 'lunghezza']);
+  const widthIndex = findIndex(['width', 'wid', 'w', 'larghezza']);
+  const heightIndex = findIndex(['height', 'h', 'altezza']);
+  const weightIndex = findIndex(['weight', 'kg', 'peso']);
+  const labelIndex = findIndex(['label', 'name', 'description', 'box', 'codice']);
+  const quantityIndex = findIndex(['quantity', 'qty', 'qta', 'quantita']);
+
+  if (lengthIndex === -1 || widthIndex === -1 || heightIndex === -1 || weightIndex === -1) {
+    throw new Error('The worksheet must include length, width, height, and weight columns.');
+  }
+
+  const entries = [];
+  for (let i = 1; i < rows.length; i += 1) {
+    const row = rows[i] || [];
+    const length = normaliseNumericCell(row[lengthIndex]);
+    const width = normaliseNumericCell(row[widthIndex]);
+    const height = normaliseNumericCell(row[heightIndex]);
+    const weight = normaliseNumericCell(row[weightIndex]);
+
+    if (length === null || width === null || height === null || weight === null) {
+      continue;
+    }
+
+    const entry = { length, width, height, weight };
+
+    if (labelIndex !== -1) {
+      entry.label = String(row[labelIndex] ?? '').trim();
+    }
+
+    if (quantityIndex !== -1) {
+      const quantityValue = normaliseNumericCell(row[quantityIndex]);
+      if (quantityValue !== null) {
+        entry.quantity = Math.floor(quantityValue);
+      }
+    }
+
+    entries.push(entry);
+  }
+
+  return entries;
+}
+
+function normaliseHeader(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function normaliseNumericCell(value) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const normalised = String(value).trim().replace(',', '.');
+  if (!normalised) {
+    return null;
+  }
+
+  const number = Number(normalised);
+  return Number.isFinite(number) ? number : null;
+}
+
 function renderError(message) {
+  currentSolutionSet = null;
+  selectedSolutionIndex = 0;
   resultsPanel.hidden = false;
   layoutPanel.hidden = true;
   summary.innerHTML = `<span class="error">${message}</span>`;
   metricsContainer.innerHTML = '';
+  solutionTabs.hidden = true;
+  solutionTabs.innerHTML = '';
+  legend.innerHTML = '';
   setViewerPlaceholder('3D preview unavailable until a valid layout is generated.');
 }
 
-function renderResult(data) {
-  const { pallet, box, metrics, orientation, arrangement, layout, layout3d } = data;
+function renderResult(rawResult) {
+  const solution = normaliseSolution(rawResult);
+  currentSolutionSet = solution;
+  selectedSolutionIndex = 0;
 
   resultsPanel.hidden = false;
-  layoutPanel.hidden = layout.length === 0;
+  summary.innerHTML = buildSummaryText(solution);
 
-  const orientationLabel = orientation === 'length-first'
-    ? 'Align boxes with pallet length first'
-    : 'Rotate pallet: best fit aligns with width first';
+  renderTabs(solution);
+  renderSelectedSolution();
+}
 
-  summary.innerHTML = `
-    <strong>${metrics.totalBoxes}</strong> boxes arranged across
-    <strong>${metrics.levels}</strong> level${metrics.levels === 1 ? '' : 's'}.
-    Strategy: ${orientationLabel}.
-  `;
+function normaliseSolution(rawResult) {
+  if (!rawResult) {
+    throw new Error('Solver returned an empty response.');
+  }
 
-  const metricMap = new Map([
-    ['Boxes / level', metrics.boxesPerLevel],
-    ['Total levels', metrics.levels],
-    ['Total boxes', metrics.totalBoxes],
-    ['Cargo footprint', `${formatNumber(metrics.cargoLength)} × ${formatNumber(metrics.cargoWidth)} cm`],
-    ['Offsets (x, y)', `${formatNumber(metrics.offsetX)} cm, ${formatNumber(metrics.offsetY)} cm`],
-    ['Total height', `${formatNumber(metrics.totalHeight)} cm`],
-    ['Occupied area', `${formatNumber(metrics.areaOccupied)} cm²`],
-    ['Unused area', `${formatNumber(metrics.unusedArea)} cm²`],
-    ['Efficiency', `${metrics.efficiency.toFixed(2)} %`],
-    ['Load weight', `${formatNumber(metrics.loadWeight)} kg`],
-    ['Combined weight', `${formatNumber(metrics.totalWeight)} kg`],
-  ]);
+  if (Array.isArray(rawResult.results) && rawResult.results.length) {
+    return {
+      mode: rawResult.mode || (rawResult.results.length > 1 ? 'multi' : 'single'),
+      pallet: rawResult.pallet,
+      results: rawResult.results,
+      summary: rawResult.summary || buildSolutionSummary(rawResult.results, rawResult.pallet),
+    };
+  }
+
+  if (!rawResult.metrics) {
+    throw new Error('Solver response is missing metrics.');
+  }
+
+  const summary = buildSolutionSummary([rawResult], rawResult.pallet);
+  return {
+    mode: 'single',
+    pallet: rawResult.pallet,
+    results: [rawResult],
+    summary,
+  };
+}
+
+function buildSolutionSummary(results, pallet) {
+  const totalBoxes = results.reduce((sum, entry) => sum + (entry.metrics?.totalBoxes ?? 0), 0);
+  const totalLoadWeight = results.reduce((sum, entry) => sum + (entry.metrics?.loadWeight ?? 0), 0);
+  const totalWeight = pallet ? pallet.weight + totalLoadWeight : totalLoadWeight;
+  const maxHeight = results.reduce(
+    (max, entry) => Math.max(max, entry.metrics?.totalHeight ?? 0),
+    pallet?.height ?? 0,
+  );
+  const unplacedBoxes = results.reduce((sum, entry) => sum + (entry.metrics?.quantityShortfall ?? 0), 0);
+
+  return {
+    totalBoxes,
+    totalLayouts: results.length,
+    totalLoadWeight,
+    totalWeight,
+    maxHeight,
+    unplacedBoxes,
+  };
+}
+
+function buildSummaryText(solution) {
+  if (!solution.results.length) {
+    return 'No layout data available.';
+  }
+
+  if (solution.results.length === 1) {
+    const entry = solution.results[0];
+    const metrics = entry.metrics;
+    const orientationLabel = entry.orientation === 'length-first'
+      ? 'Align boxes with pallet length first'
+      : 'Rotate pallet: best fit aligns with width first';
+
+    const labelPrefix = entry.meta?.displayName ? `<strong>${entry.meta.displayName}</strong>: ` : '';
+
+    return `${labelPrefix}<strong>${formatNumber(metrics.totalBoxes)}</strong> boxes arranged across `
+      + `<strong>${metrics.levels}</strong> level${metrics.levels === 1 ? '' : 's'}. `
+      + `Strategy: ${orientationLabel}.`;
+  }
+
+  const { totalBoxes, totalLayouts, totalLoadWeight, totalWeight, maxHeight, unplacedBoxes } = solution.summary;
+  const parts = [
+    `<strong>${formatNumber(totalBoxes)}</strong> boxes optimised across `
+      + `<strong>${totalLayouts}</strong> box type${totalLayouts === 1 ? '' : 's'}.`,
+    `Combined load weight: ${formatNumber(totalLoadWeight)} kg (total ${formatNumber(totalWeight)} kg including the pallet).`,
+    `Tallest stack height: ${formatNumber(maxHeight)} cm.`,
+  ];
+
+  if (unplacedBoxes > 0) {
+    parts.push(`${formatNumber(unplacedBoxes)} box${unplacedBoxes === 1 ? '' : 'es'} could not be placed due to constraints.`);
+  }
+
+  parts.push('Select a box type below to inspect its layout.');
+  return parts.join(' ');
+}
+
+function renderTabs(solution) {
+  solutionTabs.innerHTML = '';
+
+  if (solution.results.length <= 1) {
+    solutionTabs.hidden = true;
+    return;
+  }
+
+  solutionTabs.hidden = false;
+  solution.results.forEach((entry, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = entry.meta?.displayName || `Box ${index + 1}`;
+    button.dataset.index = String(index);
+    button.setAttribute('aria-pressed', index === selectedSolutionIndex ? 'true' : 'false');
+    button.addEventListener('click', () => {
+      selectSolution(index);
+    });
+    solutionTabs.appendChild(button);
+  });
+}
+
+function selectSolution(index) {
+  if (!currentSolutionSet) {
+    return;
+  }
+
+  selectedSolutionIndex = index;
+  updateTabSelection();
+  renderSelectedSolution();
+}
+
+function updateTabSelection() {
+  const buttons = solutionTabs.querySelectorAll('button');
+  buttons.forEach((button, index) => {
+    button.setAttribute('aria-pressed', index === selectedSolutionIndex ? 'true' : 'false');
+  });
+}
+
+function renderSelectedSolution() {
+  if (!currentSolutionSet || !currentSolutionSet.results.length) {
+    renderError('No layout data available.');
+    return;
+  }
+
+  const entry = currentSolutionSet.results[selectedSolutionIndex] || currentSolutionSet.results[0];
+  updateTabSelection();
+  renderMetrics(entry);
+  renderVisuals(entry);
+}
+
+function renderMetrics(entry) {
+  const metrics = entry.metrics;
+  const rows = [];
+
+  if (entry.meta?.displayName) {
+    rows.push(['Box type', entry.meta.displayName]);
+  }
+
+  if (typeof metrics.quantityRequested === 'number') {
+    rows.push(['Quantity requested', formatNumber(metrics.quantityRequested)]);
+  }
+
+  if (metrics.quantityShortfall > 0) {
+    rows.push(['Unplaced quantity', formatNumber(metrics.quantityShortfall)]);
+  }
+
+  rows.push(['Orientation', orientationDescription(entry)]);
+  rows.push(['Boxes per full level', metrics.boxesPerLevel]);
+  rows.push(['Full levels', metrics.fullLevels]);
+  rows.push(['Levels used', metrics.levels]);
+  rows.push(['Boxes on final level', metrics.lastLevelBoxes]);
+  rows.push(['Total boxes placed', metrics.totalBoxes]);
+  rows.push(['Cargo footprint', `${formatNumber(metrics.cargoLength)} × ${formatNumber(metrics.cargoWidth)} cm`]);
+  rows.push(['Offsets (x, y)', `${formatNumber(metrics.offsetX)} cm, ${formatNumber(metrics.offsetY)} cm`]);
+  rows.push(['Total height', `${formatNumber(metrics.totalHeight)} cm`]);
+  rows.push(['Occupied area', `${formatNumber(metrics.areaOccupied)} cm²`]);
+  rows.push(['Unused area', `${formatNumber(metrics.unusedArea)} cm²`]);
+  rows.push(['Efficiency', `${metrics.efficiency.toFixed(2)} %`]);
+  rows.push(['Load weight', `${formatNumber(metrics.loadWeight)} kg`]);
+  rows.push(['Combined weight', `${formatNumber(metrics.totalWeight)} kg`]);
 
   metricsContainer.innerHTML = '';
-  for (const [label, value] of metricMap.entries()) {
+  rows.forEach(([label, value]) => {
     const fragment = metricTemplate.content.cloneNode(true);
     fragment.querySelector('dt').textContent = label;
     fragment.querySelector('dd').textContent = value;
     metricsContainer.appendChild(fragment);
-  }
+  });
+}
 
-  if (!layout.length) {
+function orientationDescription(entry) {
+  return entry.orientation === 'length-first'
+    ? 'Length first (align to pallet length)'
+    : 'Width first (rotate pallet)';
+}
+
+function renderVisuals(entry) {
+  const { layout, arrangement, pallet, metrics, layout3d } = entry;
+
+  if (!layout || layout.length === 0) {
+    layoutPanel.hidden = true;
+    legend.innerHTML = '';
     setViewerPlaceholder('3D preview unavailable until a valid layout is generated.');
     return;
   }
 
+  layoutPanel.hidden = false;
   drawLayout(canvas, layout, pallet, metrics);
   updateLegend(arrangement);
   render3D(layout3d, pallet, metrics);
@@ -105,31 +541,38 @@ function formatNumber(value) {
 
 function updateLegend(arrangement) {
   legend.innerHTML = '';
+
+  if (!arrangement) {
+    return;
+  }
+
   const entries = [
     { label: `Lengthwise (${arrangement.orientation1Columns} columns)`, color: colors.lengthwise },
     { label: `Widthwise (${arrangement.orientation2Columns} columns)`, color: colors.widthwise },
   ];
 
-  for (const entry of entries) {
+  entries.forEach((entry) => {
     const span = document.createElement('span');
     span.textContent = entry.label;
     span.style.color = entry.color;
     legend.appendChild(span);
-  }
+  });
 }
 
-function drawLayout(canvas, layout, pallet, metrics) {
-  const ctx = canvas.getContext('2d');
+function drawLayout(canvasElement, layout, pallet, metrics) {
+  const ctx = canvasElement.getContext('2d');
   const padding = 30;
-  const scaleX = (canvas.width - padding * 2) / pallet.orientedLength;
-  const scaleY = (canvas.height - padding * 2) / pallet.orientedWidth;
+  const scaleX = (canvasElement.width - padding * 2) / pallet.orientedLength;
+  const scaleY = (canvasElement.height - padding * 2) / pallet.orientedWidth;
   const scale = Math.min(scaleX, scaleY);
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
   ctx.save();
-  ctx.translate((canvas.width - pallet.orientedLength * scale) / 2, (canvas.height - pallet.orientedWidth * scale) / 2);
+  ctx.translate(
+    (canvasElement.width - pallet.orientedLength * scale) / 2,
+    (canvasElement.height - pallet.orientedWidth * scale) / 2,
+  );
 
-  // Draw pallet outline
   ctx.fillStyle = 'rgba(15, 23, 42, 0.04)';
   ctx.strokeStyle = 'rgba(15, 23, 42, 0.35)';
   ctx.lineWidth = 2;
@@ -141,7 +584,7 @@ function drawLayout(canvas, layout, pallet, metrics) {
   for (const box of layout) {
     const x = box.x * scale;
     const y = box.y * scale;
-    ctx.fillStyle = colors[box.orientation];
+    ctx.fillStyle = colors[box.orientation] || colors.lengthwise;
     ctx.globalAlpha = 0.85;
     ctx.fillRect(x, y, box.length * scale, box.width * scale);
     ctx.globalAlpha = 1;

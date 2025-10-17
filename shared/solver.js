@@ -1,6 +1,10 @@
 const requiredPalletFields = ['length', 'width', 'height', 'maxHeight', 'weight', 'maxWeight'];
 const requiredBoxFields = ['length', 'width', 'height', 'weight'];
 
+function describeBox(index, label) {
+  return label ? `Box "${label}"` : `Box type ${index + 1}`;
+}
+
 function toNumber(value, fieldName) {
   const number = Number(value);
   if (!Number.isFinite(number)) {
@@ -24,6 +28,60 @@ function normaliseInputSection(section, fields, sectionName) {
     }
   }
   return result;
+}
+
+function normaliseBoxEntry(entry, index) {
+  if (!entry || typeof entry !== 'object') {
+    throw new Error(`${describeBox(index, '')} is not a valid object.`);
+  }
+
+  const base = normaliseInputSection(entry, requiredBoxFields, `boxes[${index}]`);
+  const label = typeof entry.label === 'string' ? entry.label.trim() : '';
+
+  let quantity = null;
+  if ('quantity' in entry && entry.quantity !== undefined && entry.quantity !== null && entry.quantity !== '') {
+    const quantityValue = toNumber(entry.quantity, `${describeBox(index, label)} quantity`);
+    if (quantityValue < 0) {
+      throw new Error(`${describeBox(index, label)} quantity cannot be negative.`);
+    }
+    if (quantityValue > 0) {
+      quantity = Math.floor(quantityValue);
+    }
+  }
+
+  return {
+    ...base,
+    label,
+    quantity,
+    sourceIndex: index,
+  };
+}
+
+function createBoxDisplayName(box, label) {
+  if (label) {
+    return label;
+  }
+  return `${box.length}×${box.width}×${box.height} cm`;
+}
+
+function measureLayout(layout) {
+  let maxX = 0;
+  let maxY = 0;
+  let area = 0;
+  for (const placement of layout) {
+    maxX = Math.max(maxX, placement.x + placement.length);
+    maxY = Math.max(maxY, placement.y + placement.width);
+    area += placement.length * placement.width;
+  }
+  return { length: maxX, width: maxY, area };
+}
+
+function offsetLayout(layout, offsetX, offsetY) {
+  return layout.map((placement) => ({
+    ...placement,
+    x: placement.x + offsetX,
+    y: placement.y + offsetY,
+  }));
 }
 
 function validateDimensions(pallet, box) {
@@ -135,58 +193,38 @@ function calculateLevels(pallet, box, boxesPerLevel) {
   return Math.min(maxLevelsByHeight, maxLevelsByWeight);
 }
 
-function computeCargoFootprint(config, box) {
-  const { nrBoxesOrientation1, nrBoxesOrientation2, maxBoxesWidth1, maxBoxesWidth2, nrb, extraColumns } = config;
-
-  let cargoLength = 0;
-  if (nrBoxesOrientation1 > 0 && maxBoxesWidth2 > 0) {
-    cargoLength += (nrb * box.length);
-  }
-  if (nrBoxesOrientation2 > 0 && maxBoxesWidth1 > 0) {
-    cargoLength += (extraColumns * box.width);
-  }
-
-  let cargoWidth = 0;
-  if (nrBoxesOrientation1 > 0) {
-    cargoWidth = Math.max(cargoWidth, maxBoxesWidth2 * box.width);
-  }
-  if (nrBoxesOrientation2 > 0) {
-    cargoWidth = Math.max(cargoWidth, maxBoxesWidth1 * box.length);
-  }
-
-  return { cargoLength, cargoWidth };
-}
-
-function buildLayout(config, box, offsets) {
+function buildLayout(config, box, limit = Infinity) {
   const layout = [];
   const { nrBoxesOrientation1, nrBoxesOrientation2, maxBoxesWidth1, maxBoxesWidth2, nrb, extraColumns } = config;
-  const { offsetX, offsetY } = offsets;
+  let remaining = Number.isFinite(limit) ? limit : Infinity;
 
   if (nrBoxesOrientation1 > 0 && maxBoxesWidth2 > 0) {
-    for (let i = 0; i < nrb; i++) {
-      for (let j = 0; j < maxBoxesWidth2; j++) {
+    for (let i = 0; i < nrb && remaining > 0; i++) {
+      for (let j = 0; j < maxBoxesWidth2 && remaining > 0; j++) {
         layout.push({
-          x: offsetX + i * box.length,
-          y: offsetY + j * box.width,
+          x: i * box.length,
+          y: j * box.width,
           length: box.length,
           width: box.width,
           orientation: 'lengthwise',
         });
+        remaining -= 1;
       }
     }
   }
 
-  if (nrBoxesOrientation2 > 0 && maxBoxesWidth1 > 0) {
-    const startX = offsetX + nrb * box.length;
-    for (let i = 0; i < extraColumns; i++) {
-      for (let j = 0; j < maxBoxesWidth1; j++) {
+  if (remaining > 0 && nrBoxesOrientation2 > 0 && maxBoxesWidth1 > 0) {
+    const startX = nrb * box.length;
+    for (let i = 0; i < extraColumns && remaining > 0; i++) {
+      for (let j = 0; j < maxBoxesWidth1 && remaining > 0; j++) {
         layout.push({
           x: startX + i * box.width,
-          y: offsetY + j * box.length,
+          y: j * box.length,
           length: box.width,
           width: box.length,
           orientation: 'widthwise',
         });
+        remaining -= 1;
       }
     }
   }
@@ -194,24 +232,30 @@ function buildLayout(config, box, offsets) {
   return layout;
 }
 
-function buildStack(layout, levels, box, pallet) {
+function buildStack(layout, levels, box, pallet, totalBoxes) {
   const stack = [];
   const baseHeight = pallet.height;
+  let remaining = totalBoxes;
+
   for (let level = 0; level < levels; level++) {
     const z = baseHeight + level * box.height;
     for (const placement of layout) {
+      if (remaining <= 0) {
+        return stack;
+      }
       stack.push({
         ...placement,
         level,
         z,
         height: box.height,
       });
+      remaining -= 1;
     }
   }
   return stack;
 }
 
-function formatResult(config, pallet, box, orientation) {
+function formatResult(config, pallet, box, orientation, extras = {}) {
   const boxesPerLevel = config.nrBoxesOrientation1 + config.nrBoxesOrientation2;
   if (boxesPerLevel === 0) {
     throw new Error('No boxes fit on the pallet with the provided dimensions.');
@@ -222,23 +266,55 @@ function formatResult(config, pallet, box, orientation) {
     throw new Error('No stack levels can be placed on the pallet with the provided limits.');
   }
 
+  const quantityValue = typeof extras.quantity === 'number'
+    ? extras.quantity
+    : typeof box.quantity === 'number'
+      ? box.quantity
+      : null;
+
+  let quantityRequested = null;
+  let targetBoxes = boxesPerLevel * nrLevels;
+  if (quantityValue !== null) {
+    if (quantityValue <= 0) {
+      throw new Error(`${describeBox(extras.sourceIndex ?? box.sourceIndex ?? 0, extras.label ?? box.label)} quantity must be greater than zero.`);
+    }
+    quantityRequested = Math.floor(quantityValue);
+    targetBoxes = Math.min(targetBoxes, quantityRequested);
+  }
+
+  if (targetBoxes <= 0) {
+    throw new Error('No boxes fit on the pallet with the provided dimensions.');
+  }
+
+  const fullLevels = Math.floor(targetBoxes / boxesPerLevel);
+  const remainderBoxes = targetBoxes - fullLevels * boxesPerLevel;
+  const levels = remainderBoxes > 0 ? fullLevels + 1 : fullLevels;
+  const lastLevelBoxes = remainderBoxes > 0 ? remainderBoxes : boxesPerLevel;
+  const perLevelLimit = Math.min(boxesPerLevel, targetBoxes);
+  const baseLayout = buildLayout(config, box, perLevelLimit);
+
+  if (!baseLayout.length) {
+    throw new Error('No boxes fit on the pallet with the provided dimensions.');
+  }
+
   const palletLenUsed = orientation === 1 ? pallet.length : pallet.width;
   const palletWidthUsed = orientation === 1 ? pallet.width : pallet.length;
+  const bounds = measureLayout(baseLayout);
+  const offsetX = (palletLenUsed - bounds.length) / 2;
+  const offsetY = (palletWidthUsed - bounds.width) / 2;
+  const layout = offsetLayout(baseLayout, offsetX, offsetY);
 
-  const { cargoLength, cargoWidth } = computeCargoFootprint(config, box);
-  const offsetX = (palletLenUsed - cargoLength) / 2;
-  const offsetY = (palletWidthUsed - cargoWidth) / 2;
-
-  const totalHeight = pallet.height + nrLevels * box.height;
+  const totalHeight = pallet.height + levels * box.height;
   const areaTotal = palletLenUsed * palletWidthUsed;
-  const areaOccupied = config.cargoArea;
+  const areaOccupied = bounds.area;
   const efficiency = areaTotal === 0 ? 0 : (areaOccupied / areaTotal) * 100;
-  const unusedArea = areaTotal - areaOccupied;
-  const loadWeight = nrLevels * boxesPerLevel * box.weight;
+  const unusedArea = Math.max(areaTotal - areaOccupied, 0);
+  const loadWeight = targetBoxes * box.weight;
   const totalWeight = loadWeight + pallet.weight;
-
-  const layout = buildLayout(config, box, { offsetX, offsetY });
-  const layout3d = buildStack(layout, nrLevels, box, pallet);
+  const layout3d = buildStack(layout, levels, box, pallet, targetBoxes);
+  const quantityShortfall = quantityRequested === null ? 0 : Math.max(0, quantityRequested - targetBoxes);
+  const label = extras.label ?? box.label ?? '';
+  const displayName = createBoxDisplayName(box, label);
 
   return {
     pallet: {
@@ -246,13 +322,22 @@ function formatResult(config, pallet, box, orientation) {
       orientedLength: palletLenUsed,
       orientedWidth: palletWidthUsed,
     },
-    box: { ...box },
+    box: {
+      length: box.length,
+      width: box.width,
+      height: box.height,
+      weight: box.weight,
+      label,
+      quantity: quantityRequested,
+    },
     orientation: orientation === 1 ? 'length-first' : 'width-first',
     metrics: {
       boxesPerLevel,
-      levels: nrLevels,
-      cargoLength,
-      cargoWidth,
+      levels,
+      fullLevels,
+      lastLevelBoxes,
+      cargoLength: bounds.length,
+      cargoWidth: bounds.width,
       offsetX,
       offsetY,
       totalHeight,
@@ -262,7 +347,9 @@ function formatResult(config, pallet, box, orientation) {
       unusedArea,
       loadWeight,
       totalWeight,
-      totalBoxes: nrLevels * boxesPerLevel,
+      totalBoxes: targetBoxes,
+      quantityRequested,
+      quantityShortfall,
     },
     arrangement: {
       orientation1Columns: config.nrb,
@@ -272,27 +359,93 @@ function formatResult(config, pallet, box, orientation) {
     },
     layout,
     layout3d,
+    meta: {
+      displayName,
+      sourceIndex: extras.sourceIndex ?? box.sourceIndex ?? 0,
+    },
+  };
+}
+
+function buildSolutionsSummary(results, pallet) {
+  const totalBoxes = results.reduce((sum, entry) => sum + (entry.metrics.totalBoxes || 0), 0);
+  const totalLoadWeight = results.reduce((sum, entry) => sum + (entry.metrics.loadWeight || 0), 0);
+  const totalWeight = totalLoadWeight + (pallet.weight || 0);
+  const maxHeight = results.reduce((max, entry) => Math.max(max, entry.metrics.totalHeight || 0), pallet.height || 0);
+  const unplacedBoxes = results.reduce((sum, entry) => sum + (entry.metrics.quantityShortfall || 0), 0);
+
+  return {
+    totalBoxes,
+    totalLayouts: results.length,
+    totalLoadWeight,
+    totalWeight,
+    maxHeight,
+    unplacedBoxes,
   };
 }
 
 export function solveStacking(payload) {
   const pallet = normaliseInputSection(payload.pallet, requiredPalletFields, 'pallet');
-  const box = normaliseInputSection(payload.box, requiredBoxFields, 'box');
 
-  validateDimensions(pallet, box);
+  if (Array.isArray(payload.boxes)) {
+    if (payload.boxes.length === 0) {
+      throw new Error('At least one box type is required.');
+    }
 
-  const orientation1 = calculateOrientation(pallet.length, pallet.width, box.length, box.width);
-  const orientation2 = calculateOrientation(pallet.width, pallet.length, box.length, box.width);
+    const boxes = payload.boxes.map((entry, index) => normaliseBoxEntry(entry, index));
+    const results = boxes.map((box) => {
+      validateDimensions(pallet, box);
+      const orientation1 = calculateOrientation(pallet.length, pallet.width, box.length, box.width);
+      const orientation2 = calculateOrientation(pallet.width, pallet.length, box.length, box.width);
+      const bestOrientation = orientation1.cargoArea >= orientation2.cargoArea
+        ? { config: orientation1, orientation: 1 }
+        : { config: orientation2, orientation: 2 };
+      return formatResult(bestOrientation.config, pallet, box, bestOrientation.orientation, {
+        label: box.label,
+        quantity: box.quantity,
+        sourceIndex: box.sourceIndex,
+      });
+    });
+
+    const summary = buildSolutionsSummary(results, pallet);
+    return {
+      mode: results.length > 1 ? 'multi' : 'single',
+      pallet,
+      results,
+      summary,
+    };
+  }
+
+  const boxEntry = normaliseBoxEntry(payload.box || payload, 0);
+
+  validateDimensions(pallet, boxEntry);
+
+  const orientation1 = calculateOrientation(pallet.length, pallet.width, boxEntry.length, boxEntry.width);
+  const orientation2 = calculateOrientation(pallet.width, pallet.length, boxEntry.length, boxEntry.width);
 
   const bestOrientation = orientation1.cargoArea >= orientation2.cargoArea
     ? { config: orientation1, orientation: 1 }
     : { config: orientation2, orientation: 2 };
 
-  return formatResult(bestOrientation.config, pallet, box, bestOrientation.orientation);
+  const result = formatResult(bestOrientation.config, pallet, boxEntry, bestOrientation.orientation, {
+    label: boxEntry.label,
+    quantity: boxEntry.quantity,
+    sourceIndex: boxEntry.sourceIndex,
+  });
+  const summary = buildSolutionsSummary([result], pallet);
+
+  return {
+    ...result,
+    mode: 'single',
+    results: [result],
+    summary,
+  };
 }
 
-export function solveStackingDirect(pallet, box) {
-  return solveStacking({ pallet, box });
+export function solveStackingDirect(pallet, boxOrBoxes) {
+  if (Array.isArray(boxOrBoxes)) {
+    return solveStacking({ pallet, boxes: boxOrBoxes });
+  }
+  return solveStacking({ pallet, box: boxOrBoxes });
 }
 
 export default solveStacking;

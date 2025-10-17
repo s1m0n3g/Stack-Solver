@@ -87,6 +87,22 @@ button[type='submit'] {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
+button.secondary {
+  background: rgba(31, 111, 235, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(31, 111, 235, 0.45);
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+button.secondary:hover {
+  background: rgba(31, 111, 235, 0.2);
+  transform: translateY(-1px);
+}
+
 button[type='submit']:hover {
   transform: translateY(-1px);
   box-shadow: 0 10px 20px rgba(31, 111, 235, 0.25);
@@ -96,6 +112,75 @@ button[type='submit']:hover {
   margin-top: 1rem;
   color: var(--text-muted);
   font-size: 0.9rem;
+}
+
+.form-feedback {
+  min-height: 1.2rem;
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.form-feedback--error {
+  color: #b91c1c;
+}
+
+.box-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.box-controls__group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.box-list {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.box-row {
+  position: relative;
+  border: 1px solid rgba(31, 111, 235, 0.25);
+  border-radius: 16px;
+  padding: 1rem 1.5rem 1rem 1rem;
+  background: rgba(31, 111, 235, 0.05);
+}
+
+.box-row legend {
+  font-weight: 600;
+}
+
+.box-row .remove-box {
+  position: absolute;
+  top: 0.85rem;
+  right: 0.85rem;
+  border: none;
+  background: transparent;
+  color: #b91c1c;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.box-row .remove-box:hover {
+  background: rgba(185, 28, 28, 0.12);
+  transform: translateY(-1px);
+}
+
+.box-row .remove-box[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: transparent;
+  transform: none;
 }
 
 .error {
@@ -128,6 +213,38 @@ button[type='submit']:hover {
 .metric dd {
   margin: 0.25rem 0 0;
   font-size: 1.1rem;
+}
+
+.result-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.result-tabs[hidden] {
+  display: none;
+}
+
+.result-tabs button {
+  border: 1px solid rgba(31, 111, 235, 0.4);
+  background: rgba(31, 111, 235, 0.08);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.result-tabs button[aria-pressed='true'] {
+  background: var(--accent);
+  color: #fff;
+}
+
+.result-tabs button:hover {
+  background: rgba(31, 111, 235, 0.2);
+  transform: translateY(-1px);
 }
 
 .layout {
@@ -199,6 +316,18 @@ button[type='submit']:hover {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .viewer3d::after {
