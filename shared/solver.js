@@ -358,17 +358,56 @@ function rotateLayout(layout, direction, targetDimensions) {
   };
 }
 
-function buildSegmentPlacement(entry, normalisedLayout, baseHeight, levelOffset, segmentIndex) {
-  const layout = normalisedLayout.layout;
+function rectangleIntersectionArea(a, b) {
+  const startX = Math.max(a.x, b.x);
+  const endX = Math.min(a.x + a.length, b.x + b.length);
+  if (endX <= startX) {
+    return 0;
+  }
+
+  const startY = Math.max(a.y, b.y);
+  const endY = Math.min(a.y + a.width, b.y + b.width);
+  if (endY <= startY) {
+    return 0;
+  }
+
+  return (endX - startX) * (endY - startY);
+}
+
+function isPlacementFullySupported(placement, supports, tolerance = 1e-6) {
+  if (!supports.length) {
+    return false;
+  }
+
+  const targetArea = placement.length * placement.width;
+  if (targetArea <= 0) {
+    return false;
+  }
+
+  let coveredArea = 0;
+  for (const support of supports) {
+    coveredArea += rectangleIntersectionArea(placement, support);
+    if (coveredArea + tolerance >= targetArea) {
+      return true;
+    }
+  }
+
+  return coveredArea + tolerance >= targetArea;
+}
+
+function buildSegmentPlacement(entry, normalisedLayout, baseHeight, levelOffset, segmentIndex, overrides = {}) {
+  const layout = overrides.layout ?? normalisedLayout.layout;
+  const bounds = normalisedLayout.bounds || measureLayout(layout);
   const metrics = entry.metrics || {};
   const box = entry.box || {};
-  const levels = metrics.levels || 0;
-  const totalBoxes = metrics.totalBoxes || 0;
   const heightPerLevel = box.height || 0;
+
+  const targetLevels = overrides.levels ?? metrics.levels ?? 0;
+  const totalBoxes = overrides.totalBoxes ?? metrics.totalBoxes ?? 0;
   const placements = [];
 
   let remaining = totalBoxes;
-  for (let level = 0; level < levels && remaining > 0; level += 1) {
+  for (let level = 0; level < targetLevels && remaining > 0; level += 1) {
     const z = baseHeight + level * heightPerLevel;
     for (const placement of layout) {
       if (remaining <= 0) {
@@ -385,24 +424,43 @@ function buildSegmentPlacement(entry, normalisedLayout, baseHeight, levelOffset,
     }
   }
 
-  const endHeight = baseHeight + levels * heightPerLevel;
+  const layoutColumns = layout.length || 1;
+  const actualLevels = totalBoxes > 0
+    ? Math.ceil(totalBoxes / layoutColumns)
+    : 0;
+  const endHeight = baseHeight + actualLevels * heightPerLevel;
   const label = entry.meta?.displayName
     || entry.box?.label
     || `Box ${segmentIndex + 1}`;
 
-  const loadWeight = typeof metrics.loadWeight === 'number'
-    ? metrics.loadWeight
-    : (box.weight || 0) * totalBoxes;
+  const loadWeight = overrides.loadWeight ?? (
+    typeof metrics.loadWeight === 'number'
+      ? metrics.loadWeight
+      : (box.weight || 0) * totalBoxes
+  );
 
-  const quantityRequested = typeof metrics.quantityRequested === 'number'
-    ? metrics.quantityRequested
-    : null;
+  const quantityRequested = overrides.quantityRequested ?? (
+    typeof metrics.quantityRequested === 'number'
+      ? metrics.quantityRequested
+      : null
+  );
 
-  const quantityShortfall = typeof metrics.quantityShortfall === 'number'
-    ? metrics.quantityShortfall
-    : 0;
+  const quantityShortfall = overrides.quantityShortfall ?? (
+    typeof metrics.quantityShortfall === 'number'
+      ? metrics.quantityShortfall
+      : 0
+  );
 
-  const support = calculateSupportProfile(entry);
+  const supportEntry = {
+    metrics: {
+      loadWeight,
+      areaOccupied: bounds.area,
+      cargoLength: bounds.length,
+      cargoWidth: bounds.width,
+    },
+    box: entry.box,
+  };
+  const support = calculateSupportProfile(supportEntry);
 
   return {
     placements,
@@ -419,10 +477,10 @@ function buildSegmentPlacement(entry, normalisedLayout, baseHeight, levelOffset,
       boxWidth: box.width || 0,
       startHeight: baseHeight,
       endHeight,
-      levels,
-      cargoLength: normalisedLayout.bounds.length || 0,
-      cargoWidth: normalisedLayout.bounds.width || 0,
-      areaOccupied: normalisedLayout.bounds.area || 0,
+      levels: actualLevels,
+      cargoLength: bounds.length || 0,
+      cargoWidth: bounds.width || 0,
+      areaOccupied: bounds.area || 0,
       sourceIndex: entry.meta?.sourceIndex ?? segmentIndex,
       orientation: entry.orientation,
       supportArea: support.area,
@@ -670,6 +728,14 @@ export function combineSolutions(entries, palletOverride = null) {
   };
 
   let currentHeight = basePallet.height || 0;
+  let currentSupport = [
+    {
+      x: 0,
+      y: 0,
+      length: targetDimensions.length,
+      width: targetDimensions.width,
+    },
+  ];
   let levelOffset = 0;
   const combinedLayout3d = [];
   const segments = [];
@@ -679,25 +745,101 @@ export function combineSolutions(entries, palletOverride = null) {
   let totalLoadWeight = 0;
   let totalLevels = 0;
 
+  let skippedQuantityRequested = 0;
+  let skippedQuantityShortfall = 0;
+
   for (let index = 0; index < sorted.length; index += 1) {
     const entry = sorted[index];
     const normalised = normaliseLayoutForCombination(entry, baseOrientation, targetDimensions);
-    const { placements, segment, endHeight } = buildSegmentPlacement(entry, normalised, currentHeight, levelOffset, index);
-    if (segment.totalBoxes <= 0) {
+    if (!normalised.layout.length) {
       continue;
     }
+
+    const supportedLayout = normalised.layout.filter((placement) => isPlacementFullySupported(placement, currentSupport));
+    if (!supportedLayout.length) {
+      const requested = entry.metrics?.quantityRequested ?? null;
+      const plannedBoxes = entry.metrics?.totalBoxes || 0;
+      const baseShortfall = entry.metrics?.quantityShortfall || 0;
+      if (requested !== null) {
+        skippedQuantityRequested += requested;
+      }
+      const skipShortfall = baseShortfall + plannedBoxes;
+      skippedQuantityShortfall += skipShortfall;
+      continue;
+    }
+
+    const layoutBounds = measureLayout(supportedLayout);
+    const perLevelCount = supportedLayout.length;
+    const potentialLevels = entry.metrics?.levels || 0;
+    if (perLevelCount === 0 || potentialLevels === 0) {
+      continue;
+    }
+    const plannedBoxes = entry.metrics?.totalBoxes || 0;
+    const maxCapacity = perLevelCount * potentialLevels;
+    const feasibleBoxes = Math.min(plannedBoxes, maxCapacity);
+    const fullLevels = Math.min(potentialLevels, Math.floor(feasibleBoxes / perLevelCount));
+    if (fullLevels === 0) {
+      const requested = entry.metrics?.quantityRequested ?? null;
+      const baseShortfall = entry.metrics?.quantityShortfall || 0;
+      const skipShortfall = baseShortfall + plannedBoxes;
+      if (requested !== null) {
+        skippedQuantityRequested += requested;
+      }
+      skippedQuantityShortfall += skipShortfall;
+      continue;
+    }
+
+    const actualBoxes = perLevelCount * fullLevels;
+    const lostBoxes = plannedBoxes - actualBoxes;
+    const baseShortfall = entry.metrics?.quantityShortfall || 0;
+    const quantityRequested = entry.metrics?.quantityRequested ?? null;
+    const adjustedShortfall = baseShortfall + lostBoxes;
+    const loadWeight = (entry.box?.weight || 0) * actualBoxes;
+
+    const overrides = {
+      layout: supportedLayout,
+      levels: fullLevels,
+      totalBoxes: actualBoxes,
+      loadWeight,
+      quantityRequested,
+      quantityShortfall: adjustedShortfall,
+    };
+
+    const { placements, segment, endHeight } = buildSegmentPlacement(
+      entry,
+      { layout: supportedLayout, bounds: layoutBounds },
+      currentHeight,
+      levelOffset,
+      segments.length,
+      overrides,
+    );
+    if (segment.totalBoxes <= 0) {
+      const skipShortfall = baseShortfall + plannedBoxes;
+      if (quantityRequested !== null) {
+        skippedQuantityRequested += quantityRequested;
+      }
+      skippedQuantityShortfall += skipShortfall;
+      continue;
+    }
+
     combinedLayout3d.push(...placements);
     segments.push({ ...segment });
     segmentLayouts.push({
       index: segments.length - 1,
-      layout: normalised.layout.map((placement) => ({ ...placement })),
+      layout: supportedLayout.map((placement) => ({ ...placement })),
     });
 
     currentHeight = endHeight;
-    levelOffset += entry.metrics?.levels || 0;
+    levelOffset += segment.levels || 0;
     totalBoxes += segment.totalBoxes;
     totalLoadWeight += segment.loadWeight;
     totalLevels += segment.levels || 0;
+    currentSupport = supportedLayout.map((placement) => ({
+      x: placement.x,
+      y: placement.y,
+      length: placement.length,
+      width: placement.width,
+    }));
   }
 
   if (!segments.length) {
@@ -713,9 +855,11 @@ export function combineSolutions(entries, palletOverride = null) {
   const maxCargoWidth = segments.reduce((max, segment) => Math.max(max, segment.cargoWidth || 0), 0);
   const maxAreaOccupied = segments.reduce((max, segment) => Math.max(max, segment.areaOccupied || 0), 0);
   const unusedArea = Math.max(0, areaTotal - maxAreaOccupied);
-  const quantityRequestedTotal = segments.reduce((sum, segment) => sum + (segment.quantityRequested ?? 0), 0);
-  const hasRequested = segments.some((segment) => segment.quantityRequested !== null);
-  const quantityShortfallTotal = segments.reduce((sum, segment) => sum + (segment.quantityShortfall || 0), 0);
+  const quantityRequestedFromSegments = segments.reduce((sum, segment) => sum + (segment.quantityRequested ?? 0), 0);
+  const quantityRequestedTotal = quantityRequestedFromSegments + skippedQuantityRequested;
+  const hasRequested = segments.some((segment) => segment.quantityRequested !== null) || skippedQuantityRequested > 0;
+  const quantityShortfallFromSegments = segments.reduce((sum, segment) => sum + (segment.quantityShortfall || 0), 0);
+  const quantityShortfallTotal = quantityShortfallFromSegments + skippedQuantityShortfall;
 
   const combinedMetrics = {
     totalBoxes,
