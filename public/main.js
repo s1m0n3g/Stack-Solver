@@ -72,6 +72,7 @@ boxesContainer.addEventListener('click', (event) => {
       ensureAtLeastOneBox();
       updateRemoveButtons();
       setBoxFeedback('Box type removed.');
+      updateBoxRowStatuses(currentSolutionSet);
     }
   }
 });
@@ -122,6 +123,7 @@ excelInput.addEventListener('change', async (event) => {
     }
     updateRemoveButtons();
     setBoxFeedback(`Imported ${entries.length} box type${entries.length === 1 ? '' : 's'} from “${file.name}”.`);
+    updateBoxRowStatuses(currentSolutionSet);
   } catch (error) {
     setBoxFeedback(error.message, 'error');
   }
@@ -138,6 +140,7 @@ function initialiseBoxes() {
   });
   updateRemoveButtons();
   clearBoxFeedback();
+  updateBoxRowStatuses(currentSolutionSet);
 }
 
 function initialiseViewToggles() {
@@ -272,7 +275,9 @@ function addBoxRow(values = {}) {
     }
   });
 
+  clearRowStatus(fieldset);
   boxesContainer.appendChild(fieldset);
+  updateBoxRowStatuses(currentSolutionSet);
 }
 
 function ensureAtLeastOneBox() {
@@ -308,6 +313,73 @@ function setBoxFeedback(message, type = 'info') {
   } else {
     boxFeedback.classList.remove('form-feedback--error');
   }
+}
+
+function clearRowStatus(row) {
+  if (!row) {
+    return;
+  }
+  row.removeAttribute('data-status');
+  row.removeAttribute('data-status-label');
+}
+
+function updateBoxRowStatuses(solution) {
+  const rows = Array.from(boxesContainer.querySelectorAll('.box-row'));
+  if (!rows.length) {
+    return;
+  }
+
+  const statusByIndex = new Map();
+  if (solution && Array.isArray(solution.results)) {
+    solution.results.forEach((entry) => {
+      const sourceIndex = entry?.meta?.sourceIndex ?? entry?.box?.sourceIndex;
+      if (typeof sourceIndex !== 'number' || Number.isNaN(sourceIndex)) {
+        return;
+      }
+      const metrics = entry.metrics || {};
+      const placed = metrics.totalBoxes ?? 0;
+      const requested = typeof metrics.quantityRequested === 'number' && metrics.quantityRequested > 0
+        ? metrics.quantityRequested
+        : null;
+      const shortfall = metrics.quantityShortfall ?? (
+        requested !== null
+          ? Math.max(0, requested - placed)
+          : 0
+      );
+      statusByIndex.set(sourceIndex, { placed, requested, shortfall });
+    });
+  }
+
+  rows.forEach((row, index) => {
+    const status = statusByIndex.get(index);
+    if (!status) {
+      clearRowStatus(row);
+      return;
+    }
+
+    let key = '';
+    let label = '';
+    if (status.placed <= 0) {
+      key = 'unplaced';
+      label = 'Non posizionato';
+    } else if (status.requested !== null && status.requested > 0 && status.shortfall > 0) {
+      key = 'partial';
+      label = 'Parziale';
+    } else if (status.requested !== null && status.requested > 0) {
+      key = 'accepted';
+      label = 'Completato';
+    } else {
+      key = 'accepted';
+      label = 'Completato';
+    }
+
+    if (key) {
+      row.setAttribute('data-status', key);
+      row.setAttribute('data-status-label', label);
+    } else {
+      clearRowStatus(row);
+    }
+  });
 }
 
 function downloadTemplateWorkbook() {
@@ -493,6 +565,7 @@ function renderError(message) {
     : '3D view hidden. Toggle to show the preview.';
   setViewerPlaceholder(placeholder);
   viewer3d.hidden = !threeViewVisible;
+  updateBoxRowStatuses(currentSolutionSet);
 }
 
 function renderResult(rawResult) {
@@ -505,6 +578,7 @@ function renderResult(rawResult) {
 
   renderTabs(solution);
   renderSelectedSolution();
+  updateBoxRowStatuses(solution);
 }
 
 function normaliseSolution(rawResult) {
@@ -706,7 +780,11 @@ function renderMetrics(entry) {
       rows.push({ label: 'Total quantity requested', value: formatNumber(metrics.quantityRequested) });
     }
     if (metrics.quantityShortfall > 0) {
-      rows.push({ label: 'Total unplaced quantity', value: formatNumber(metrics.quantityShortfall) });
+      rows.push({
+        label: 'Total unplaced quantity',
+        value: formatNumber(metrics.quantityShortfall),
+        modifier: 'metric--danger',
+      });
     }
     rows.push({ label: 'Orientation', value: `${orientationDescription(entry)} (base layout)` });
     rows.push({ label: 'Total boxes placed', value: formatNumber(metrics.totalBoxes) });
@@ -762,7 +840,11 @@ function renderMetrics(entry) {
     }
 
     if (metrics.quantityShortfall > 0) {
-      rows.push({ label: 'Unplaced quantity', value: formatNumber(metrics.quantityShortfall) });
+      rows.push({
+        label: 'Unplaced quantity',
+        value: formatNumber(metrics.quantityShortfall),
+        modifier: 'metric--danger',
+      });
     }
 
     rows.push({ label: 'Orientation', value: orientationDescription(entry) });
@@ -791,6 +873,10 @@ function renderMetrics(entry) {
     const dt = fragment.querySelector('dt');
     const dd = fragment.querySelector('dd');
     dt.textContent = row.label;
+
+    if (row.modifier) {
+      metricElement.classList.add(row.modifier);
+    }
 
     if (row.swatchColor) {
       metricElement.classList.add('metric--with-swatch');
