@@ -1,0 +1,237 @@
+:root {
+  color-scheme: light dark;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  line-height: 1.5;
+  --bg: #f7f9fc;
+  --panel-bg: #ffffff;
+  --accent: #1f6feb;
+  --border: #d0d7de;
+  --text-muted: #57606a;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: #24292f;
+}
+
+header,
+footer {
+  background: #0d1117;
+  color: #f6f8fa;
+  text-align: center;
+  padding: 1.5rem 1rem;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 2.2rem;
+}
+
+header .tagline {
+  margin: 0.25rem 0 0;
+  color: rgba(246, 248, 250, 0.75);
+}
+
+main {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  padding: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.panel {
+  background: var(--panel-bg);
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  border: 1px solid var(--border);
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+input[type='number'] {
+  margin-top: 0.35rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+
+button[type='submit'] {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 999px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+button[type='submit']:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(31, 111, 235, 0.25);
+}
+
+.hint {
+  margin-top: 1rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.error {
+  color: #d73a49;
+  font-weight: 600;
+}
+
+.results #result-summary {
+  margin-bottom: 1rem;
+  font-size: 1.05rem;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.metric {
+  background: rgba(31, 111, 235, 0.08);
+  border-radius: 12px;
+  padding: 0.75rem;
+}
+
+.metric dt {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.metric dd {
+  margin: 0.25rem 0 0;
+  font-size: 1.1rem;
+}
+
+.layout {
+  grid-column: 1 / -1;
+}
+
+.layout-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.layout-header--secondary {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.legend {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.legend span::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+#layout-canvas {
+  width: 100%;
+  height: auto;
+  margin-top: 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(15, 23, 42, 0.03),
+    rgba(15, 23, 42, 0.03) 12px,
+    rgba(15, 23, 42, 0.05) 12px,
+    rgba(15, 23, 42, 0.05) 24px
+  );
+}
+
+.viewer3d {
+  position: relative;
+  margin-top: 1rem;
+  height: 420px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: radial-gradient(circle at top, rgba(148, 163, 184, 0.18), transparent 55%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.05), rgba(15, 23, 42, 0.02));
+  overflow: hidden;
+}
+
+.viewer3d canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.viewer3d::after {
+  content: attr(data-placeholder);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  padding: 1.5rem;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(248, 250, 252, 0.7));
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.viewer3d[data-state='empty']::after {
+  opacity: 1;
+}
+
+.viewer3d[data-state='ready']::after {
+  opacity: 0;
+}
+
+@media (max-width: 720px) {
+  main {
+    grid-template-columns: 1fr;
+  }
+
+  .layout-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
