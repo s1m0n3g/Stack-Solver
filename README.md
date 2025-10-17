@@ -8,6 +8,7 @@ Stack Solver Web is a browser-based pallet loading optimizer built with Node.js 
 - 📐 **Automatic orientation selection** – evaluates both pallet orientations and picks the configuration that maximises the occupied area.
 - 📊 **Detailed metrics** – displays efficiency, number of boxes per level, total weight, and more.
 - 🖼️ **Interactive layout preview** – renders a scaled top-down view of the pallet showing both box orientations.
+- 🧱 **3D pallet visualisation** – reproduces the original desktop app's 3D stack preview directly in the browser using WebGL.
 - 🌐 **Browser access** – run the solver locally as a Node.js web server without requiring Windows or WPF.
 
 ## Getting started
@@ -67,7 +68,10 @@ A REST endpoint is available at `POST /api/solve` for programmatic access. Examp
 }
 ```
 
-The response contains pallet metrics, arrangement details, and a ready-to-render layout array for custom visualisations.
+The response contains pallet metrics, arrangement details, and layout arrays for custom visualisations:
+
+- `layout` – placements for a single pallet level (useful for 2D projections).
+- `layout3d` – placements repeated for each stack level with height data for 3D rendering.
 
 ## License
 

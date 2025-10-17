@@ -194,6 +194,23 @@ function buildLayout(config, box, offsets) {
   return layout;
 }
 
+function buildStack(layout, levels, box, pallet) {
+  const stack = [];
+  const baseHeight = pallet.height;
+  for (let level = 0; level < levels; level++) {
+    const z = baseHeight + level * box.height;
+    for (const placement of layout) {
+      stack.push({
+        ...placement,
+        level,
+        z,
+        height: box.height,
+      });
+    }
+  }
+  return stack;
+}
+
 function formatResult(config, pallet, box, orientation) {
   const boxesPerLevel = config.nrBoxesOrientation1 + config.nrBoxesOrientation2;
   if (boxesPerLevel === 0) {
@@ -221,6 +238,7 @@ function formatResult(config, pallet, box, orientation) {
   const totalWeight = loadWeight + pallet.weight;
 
   const layout = buildLayout(config, box, { offsetX, offsetY });
+  const layout3d = buildStack(layout, nrLevels, box, pallet);
 
   return {
     pallet: {
@@ -253,6 +271,7 @@ function formatResult(config, pallet, box, orientation) {
       orientation2PerColumn: config.maxBoxesWidth1,
     },
     layout,
+    layout3d,
   };
 }
 
