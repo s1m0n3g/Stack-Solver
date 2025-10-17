@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm';
+import { templateWorkbookBase64 } from './templateWorkbook.js';
 import { solveStacking, combineSolutions } from '../shared/solver.js';
 
 const form = document.getElementById('stack-form');
@@ -17,6 +18,7 @@ const boxesContainer = document.getElementById('boxes-container');
 const boxTemplate = document.getElementById('box-row-template');
 const addBoxButton = document.getElementById('add-box');
 const importExcelButton = document.getElementById('import-excel');
+const downloadTemplateButton = document.getElementById('download-template');
 const excelInput = document.getElementById('excel-input');
 const boxFeedback = document.getElementById('box-feedback');
 
@@ -70,6 +72,18 @@ boxesContainer.addEventListener('click', (event) => {
 importExcelButton.addEventListener('click', () => {
   excelInput.click();
 });
+
+if (downloadTemplateButton) {
+  downloadTemplateButton.addEventListener('click', () => {
+    try {
+      downloadTemplateWorkbook();
+      setBoxFeedback('Modello Excel di esempio scaricato.');
+    } catch (error) {
+      console.error(error);
+      setBoxFeedback('Non è stato possibile preparare il modello Excel di esempio.', 'error');
+    }
+  });
+}
 
 excelInput.addEventListener('change', async (event) => {
   const [file] = event.target.files || [];
@@ -173,6 +187,31 @@ function setBoxFeedback(message, type = 'info') {
   } else {
     boxFeedback.classList.remove('form-feedback--error');
   }
+}
+
+function downloadTemplateWorkbook() {
+  const bytes = base64ToUint8Array(templateWorkbookBase64);
+  const blob = new Blob([bytes], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'stack-solver-box-template.xlsx';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function base64ToUint8Array(base64) {
+  const normalized = base64.replace(/\s+/g, '');
+  const binaryString = atob(normalized);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let index = 0; index < binaryString.length; index += 1) {
+    bytes[index] = binaryString.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function buildPayload() {
